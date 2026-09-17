@@ -1,66 +1,66 @@
-# Fatturazione Utenze — container Docker "billing" (scheletro minimo)
+# Fatturazione Utenze — container Docker "billing"
 
-Nota per chi continua lo sviluppo (Claude Code) e per Daniele: cosa c'è già, cosa manca, come si avvia.
+Nota per chi continua lo sviluppo (Claude Code) e per Daniele: cosa c'è già, cosa manca, come si avvia. **Aggiornato al 17/09/2026, fine sessione.**
 
-Cartella sul VPS: **`/opt/billing`**. Nome del container: **`billing`** (vedi `docker-compose.yml`).
+Cartella sul VPS: **`/opt/billing`**. Nome del container: **`billing`** (vedi `docker-compose.yml`). Repository GitHub: **`github.com/danielesturla73/billing.smarth20.com`** (branch `main`, già collegato con `git remote`).
 
-## Stato reale sulla VPS (verificato il 16/09/2026 — non più solo un piano, è già così)
+## Stato reale sulla VPS (verificato il 17/09/2026)
 
-- Container `billing`: **su e "healthy"**, build riuscito al primo tentativo, porta `8010` (host) → `8000` (interna).
-- Rete Docker condivisa `rete-interna-idrico`: **creata**, e `billing` è già collegato.
-- Container di WMS SmartH2O (nome reale: **`wms-smarth20`**, non "wms-backend") è **già collegato** alla stessa rete — raggiungibile da `billing` all'indirizzo `http://wms-smarth20:80` (attenzione: porta **80**, non 8080 — quella è solo la porta pubblicata verso l'host/Caddy).
-- Confermato anche un container `caddy` sulla stessa VPS (reverse proxy pubblico, porte 80/443) — non ancora collegato alla rete condivisa, non serve finché non esiste un'interfaccia web vera da esporre (vedi punto 3 sotto).
-- `.env` già presente e compilato con un token generato per davvero (non più il segnaposto) e `WMS_API_URL=http://wms-smarth20:80`.
+- Container `billing`: **su e "healthy"**, porta `8010` (host) → `8000` (interna), pubblico su `billing.smarth20.com` (HTTPS via Caddy).
+- Rete Docker condivisa `rete-interna-idrico`: **collegata** (`billing`, `wms-smarth20`, `caddy`).
+- `.env` presente e compilato (token vero, `WMS_API_URL=http://wms-smarth20:80`) — **non ancora usato da nessun endpoint** (il pulsante "a un click" verso WMS SmartH2O non esiste ancora, vedi sotto).
+- Repository git **inizializzato e pushato** su GitHub (vedi sopra). `.gitignore`/`.dockerignore` già a posto: niente segreti, dati reali o CSV/DB finiscono in git.
 
-## Cosa c'è nel codice
+## Cosa c'è nel codice (fatto in questa sessione)
 
-- Un servizio web minimo (FastAPI) che risponde su `/health` e `/` — non fa ancora nulla di utile, serve solo a verificare che il container sia su e raggiungibile.
-- Il motore di calcolo vero (`app/motore_calcolo.py`, copia di `motore_calcolo.py` in radice) — tutta la logica del Metodo B, archivio storico, statistiche per distretto, ecc. È importato da `app/main.py` solo per verificare che carichi senza errori all'avvio; non è ancora collegato a nessun endpoint.
-- `Dockerfile` e `docker-compose.yml`, già collegati alla rete Docker condivisa con WMS SmartH2O (vedi il project doc `riepilogo-progetto-wms-smarth2o.md`, sezione 4.9, per il perché di queste scelte).
+- **`app/main.py`** — servizio FastAPI con:
+  - `GET /health`, `GET /` — health-check e stub.
+  - `POST /upload` — carica una o più estrazioni Neta H2O (.xlsx), riconosce il comune dalla colonna `LOCALITA` (non dal nome file), aggiorna l'archivio storico. Gestisce comuni nuovi automaticamente.
+  - `GET /riepilogo`, `GET /diagnostica` — API JSON (parametro opzionale `?comune=`): riepilogo dei volumi (Import_WMS, trimestrale, per comune) e dettaglio anomalie riga per riga.
+  - `GET /pagine/riepilogo`, `GET /pagine/diagnostica` — le **prime pagine web vere** (Jinja2 + `app/templates/`, stile preso da `style-guide-wms-smarth2o.md`: header scuro con filtro Comune, tab di navigazione, KPI, tabelle). Nessun grafico ancora (specifiche §6.2, non confermate da Daniele).
+- **`app/database.py`** (nuovo) — archivio storico su **SQLite** (`archivio/archivio.db`, un solo file con tutti i comuni, indicizzato, WAL mode), ha sostituito i CSV per-comune usati inizialmente. `motore_calcolo.carica_archivio`/`aggiorna_archivio` (CSV) restano nel codice solo per uso da riga di comando (`python -m app.motore_calcolo file.xlsx`), non più usati dall'app web.
+- **`app/motore_calcolo.py`** — motore di calcolo (Metodo B), **ottimizzato** (~10x più rapido: il ciclo per-utenza e la ripartizione mensile erano il collo di botiglia; validato confrontando tutte le tabelle prodotte prima/dopo su dati reali, nessuna differenza). **Bug corretto**: `trova_cessate_con_stima_finale`/`trova_utenze_scomparse` ora usano la stessa regola di priorità-stesso-giorno di `calcola_periodi_metodo_b` (prima non erano coerenti tra loro — vedi commento `_ordina_priorita_stessa_data` nel codice per i dettagli).
+- **`scripts/migra_csv_a_sqlite.py`** — migrazione one-off CSV→SQLite, già eseguita sui dati reali (i due CSV originali restano su disco come backup, non più letti dall'app).
+- **`app/templates/`, `app/static/`** — template Jinja2 e CSS (palette/tipografia da `style-guide-wms-smarth2o.md`).
 
-## ⚠️ Da portare qui prima di far partire Claude Code
+## Cosa manca lato applicativo (per la prossima sessione)
 
-Questa cartella di codice NON include ancora, di suo:
-- **I tre documenti di specifica del progetto** (`specifiche-applicativo-fatturazione-utenze.md`, `riepilogo-progetto-wms-smarth2o.md`, `style-guide-wms-smarth2o.md`) — servono a Claude Code per non reinventare decisioni già prese (es. perché solo Metodo B, perché niente dotazione pro-capite, lo stile grafico da seguire). Vanno messi in una cartella `project_docs/` qui dentro.
-- **Dati veri** per testare: l'archivio storico (`archivio/archivio_letture.csv`, `archivio/archivio_letture_mortara.csv`) e le estrazioni Excel originali (`input/*.xlsx`) — oggi le cartelle `archivio/`, `input/`, `output/` sulla VPS sono vuote.
+1. **Grafici** — proposta scritta in `specifiche-applicativo-fatturazione-utenze.md` §6.2, **non ancora confermata da Daniele**: non costruirli senza chiedere prima (che tipo di grafico, quali pagine, Chart.js come da style guide).
+2. **Il pulsante "a un click"** verso WMS SmartH2O — endpoint che chiama l'API di WMS SmartH2O sulla rete Docker interna (`WMS_API_URL`, `INTERNAL_API_TOKEN` già in `.env`) e manda i dati di Import_WMS. Deve gestire l'upsert (i valori possono essere provvisori, vedi §4.8 del riepilogo di progetto).
+3. **Autenticazione** — sia per l'interfaccia web (chi carica file, chi preme "invia a WMS") sia il token interno verso WMS SmartH2O. Oggi tutto è aperto, nessun login.
+4. **Upload dalla pagina web** — oggi `/upload` è solo un'API (va chiamata con `curl -F` o Postman); manca la schermata di caricamento file vera.
+5. **Da decidere con Daniele prima di costruire**: quanti livelli di permesso servono (viewer/editing/admin?), se il login può essere condiviso con WMS SmartH2O.
 
-Se hai ricevuto da Daniele l'archivio `billing-docs-e-dati.zip`, ti basta spacchettarlo dentro `/opt/billing` (sovrascrive le cartelle vuote con i dati veri):
+## Ambiguità nota, non affrontata (bassa priorità)
+
+Nel motore di calcolo, ~33 casi (su Belgioioso) di due letture della stessa utenza con la stessa data e la stessa priorità (nessuna regola esistente le distingue) causano una variazione trascurabile (~0,004% del volume totale) a seconda dell'ordine con cui le legge il database. Non è un problema introdotto da questa sessione (era già latente nei CSV), è stato solo scoperto migrando a SQLite. Daniele ha scelto di non affrontarlo ora — se dovesse servire, i casi sono trovabili con lo script di confronto usato in questa sessione (vedi conversazione, non salvato come file).
+
+## Come si riavvia
 
 ```bash
 cd /opt/billing
-unzip -o billing-docs-e-dati.zip
-docker compose restart   # per far ripartire il container con l'archivio popolato nei volumi
-```
-
-## Cosa manca lato applicativo (per Claude Code)
-
-1. **Upload delle estrazioni Neta H2O** — oggi i file Excel vengono passati a mano; serve un endpoint di upload che li salvi e aggiorni l'archivio (vedi `aggiorna_archivio()` in `motore_calcolo.py`, già pronta).
-2. **Le pagine vere** — dashboard, riepiloghi, tutto quello che oggi sta nei 17 fogli dell'Excel di output (vedi `specifiche-applicativo-fatturazione-utenze.md`, sezione 3, per l'elenco completo).
-3. **Il pulsante "a un click"** verso WMS SmartH2O — un endpoint che chiama l'API di WMS SmartH2O sulla rete Docker interna (usando `WMS_API_URL` e `INTERNAL_API_TOKEN` da `.env`) e gli manda i dati del foglio Import_WMS. Per ora resta un invio con conferma umana, non uno scheduler automatico (vedi 4.9 del riepilogo di progetto per il perché).
-4. **Un vero database** — oggi l'archivio è un CSV su disco (`archivio/archivio_letture.csv`); è già stato proposto SQLite (vedi documento di specifica), ma non ancora implementato.
-5. **Autenticazione** dell'interfaccia web (chi può caricare file, chi può premere il pulsante di invio).
-6. **Grafici** (proposta già scritta, vedi specifiche sezione 6.2) e lo stile grafico coerente con WMS SmartH2O (vedi `style-guide-wms-smarth2o.md`).
-
-## Come si riavvia (i comandi di primo avvio sono già stati fatti — questo è solo per riferimento futuro)
-
-La rete condivisa e il collegamento a WMS SmartH2O sono già a posto (vedi sopra). Per un riavvio, dentro `/opt/billing`:
-
-```bash
 docker compose up -d --build
-```
-
-Verifica che risponda:
-
-```bash
 curl http://localhost:8010/health
 # -> {"status":"ok","servizio":"billing"}
-```
-
-Verifica che il container si chiami davvero "billing" e sia sulla rete condivisa:
-
-```bash
 docker ps --filter name=billing
 docker network inspect rete-interna-idrico
+```
+
+Per rifare la migrazione CSV→SQLite da capo (solo se serve, es. archivio.db corrotto o cancellato per errore — i CSV originali restano su disco):
+
+```bash
+docker compose run --rm billing python -m scripts.migra_csv_a_sqlite
+```
+
+## Git / GitHub
+
+Repo già inizializzato, remote già collegato (`origin` → `github.com/danielesturla73/billing.smarth20.com`, branch `main`). Chiave SSH già autorizzata sulla VPS (`~/.ssh/id_ed25519_wms`, condivisa con il progetto WMS SmartH2O). Ciclo normale per i prossimi commit:
+
+```bash
+cd /opt/billing
+git add <file modificati>
+git commit -m "descrizione"
+git push
 ```
 
 ## Struttura
@@ -69,16 +69,21 @@ docker network inspect rete-interna-idrico
 .
 ├── app/
 │   ├── __init__.py
-│   ├── main.py            # servizio FastAPI (scheletro minimo)
-│   └── motore_calcolo.py  # motore di calcolo (copia di quello in radice)
-├── archivio/               # CSV storico delle letture (montato come volume)
-├── input/                  # estrazioni Excel caricate (montato come volume)
-├── output/                 # Excel generati (montato come volume)
-├── project_docs/           # copie locali delle specifiche del progetto Claude
-├── motore_calcolo.py       # ⚠️ copia originale in radice, usata finora per lo sviluppo/test in questa sessione Claude — da considerare superata rispetto ad app/motore_calcolo.py una volta che lo sviluppo prosegue nel container
+│   ├── main.py              # servizio FastAPI: health, upload, riepilogo/diagnostica (JSON + pagine HTML)
+│   ├── motore_calcolo.py    # motore di calcolo (Metodo B), ottimizzato
+│   ├── database.py          # archivio storico su SQLite
+│   ├── templates/           # pagine Jinja2 (base, riepilogo, diagnostica)
+│   └── static/              # CSS (stile WMS SmartH2O)
+├── scripts/
+│   └── migra_csv_a_sqlite.py  # migrazione one-off, già eseguita
+├── archivio/                 # archivio.db (SQLite) + i due CSV originali (backup, non più letti)
+├── input/                    # estrazioni Excel caricate (montato come volume)
+├── output/                   # Excel generati da esporta_excel() (montato come volume, non ancora collegato a un endpoint)
+├── project_docs/             # specifiche/decisioni di progetto (leggere PRIMA di modificare la logica di calcolo)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
+├── CLAUDE.md                 # guida per Claude Code su architettura/comandi
 └── .dockerignore / .gitignore
 ```

@@ -2,22 +2,22 @@
 Punto d'ingresso del servizio web di Fatturazione Utenze.
 
 Stato al 17/09/2026: oltre al health-check ci sono un endpoint di upload
-delle estrazioni Neta H2O (/upload), un endpoint di riepilogo/ricalcolo
-(/riepilogo) e un endpoint di diagnostica (/diagnostica, il dettaglio
-riga per riga delle anomalie che /riepilogo conta soltanto). L'archivio
-storico vive ora in SQLite (archivio/archivio.db, vedi app/database.py)
-invece che in CSV per comune. Il resto e' ancora uno SCHELETRO MINIMO,
-non l'interfaccia vera.
+delle estrazioni Neta H2O (/upload), endpoint di riepilogo/diagnostica in
+JSON (/riepilogo, /diagnostica) e le PRIME PAGINE VERE (/pagine/riepilogo,
+/pagine/diagnostica — stesso motore, stessa scelta di comune, ma rese in
+HTML con lo stile di WMS SmartH2O invece che JSON grezzo). L'archivio
+storico vive in SQLite (archivio/archivio.db, vedi app/database.py)
+invece che in CSV per comune.
 
 Cosa NON c'e' ancora, e va costruito (pensato per Claude Code):
-- le pagine vere (dashboard, riepiloghi, i fogli che oggi sono nell'Excel:
-  /riepilogo e /diagnostica restituiscono gia' i dati, manca solo il modo
-  di mostrarli)
+- i grafici (proposta in specifiche 6.2, non ancora confermata da Daniele
+  — non costruirli senza conferma esplicita)
 - il pulsante "a un click" che invia i dati a WMS SmartH2O (vedi 4.9:
   per ora e' un invio manuale/con conferma umana, non uno scheduler
   automatico)
 - l'autenticazione (sia per chi usa l'interfaccia, sia il token interno
   verso WMS SmartH2O, vedi INTERNAL_API_TOKEN in .env.example)
+- upload/gestione utenti dalle pagine web (oggi solo via /upload, API)
 
 Il motore di calcolo vero e proprio resta in motore_calcolo.py (Metodo
 B, statistiche per distretto, ecc.) — questo file lo importa ma non ne
@@ -28,7 +28,10 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
@@ -39,6 +42,8 @@ app = FastAPI(
     description="Calcolo dei volumi fatturati per distretto idrico, a partire dalle estrazioni Neta H2O.",
     version="0.1.0",
 )
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
 
 # Percorso relativo alla working directory del processo ("input/"),
 # coerente con quello gia' usato da motore_calcolo.py e con i volumi
@@ -58,12 +63,9 @@ def health_check():
 
 @app.get("/")
 def root():
-    return {
-        "servizio": "billing",
-        "nome_esteso": "Fatturazione Utenze",
-        "stato": "scheletro minimo — interfaccia vera ancora da costruire",
-        "vedi": "/health",
-    }
+    """Ora che esiste una pagina vera (/pagine/riepilogo), la radice ci
+    rimanda direttamente invece di mostrare un JSON di stato."""
+    return RedirectResponse(url="/pagine/riepilogo")
 
 
 @app.post("/upload")
@@ -245,3 +247,92 @@ def diagnostica(comune: str | None = None):
         raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
 
     return {"comuni": comuni_risultato}
+
+
+def _comuni_disponibili() -> list[str]:
+    with database.connessione() as conn:
+        return database.elenco_comuni(conn)
+
+
+@app.get("/pagine/riepilogo")
+def pagina_riepilogo(request: Request, comune: str | None = None):
+    """Stessi dati di /riepilogo, mostrati come pagina HTML invece che
+    JSON grezzo — la vista principale prevista dalle specifiche (sezione
+    6.0): filtro Comune nell'header (persistente tra le pagine), KPI in
+    alto, tabella Import_WMS sotto. Senza ?comune= mostra un colpo
+    d'occhio su tutti i comuni invece del dettaglio.
+    """
+    comuni_disponibili = _comuni_disponibili()
+
+    if comune:
+        trovati = list(_risultati_per_comune(comune))
+        if not trovati:
+            raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+        comune_trovato, risultato = trovati[0]
+        trimestri_provvisori = risultato.volumi_distretto_trimestre[
+            risultato.volumi_distretto_trimestre["Contiene Stime Provvisorie"] == "Sì"
+        ]["Trimestre"].nunique()
+        return templates.TemplateResponse(request, "riepilogo.html", {
+            "request": request,
+            "pagina_attiva": "riepilogo",
+            "comuni_disponibili": comuni_disponibili,
+            "comune_selezionato": comune_trovato,
+            "comune": comune_trovato,
+            "warning": risultato.warning,
+            "volume_totale": float(risultato.volumi_distretto_mese["Volume Fatturato (m3)"].sum()),
+            "n_mesi": int(risultato.volumi_distretto_mese["Mese"].nunique()),
+            "trimestri_provvisori": int(trimestri_provvisori),
+            "volumi_distretto_mese": _tabella_json(risultato.volumi_distretto_mese),
+        })
+
+    riepilogo_comuni = [
+        {"comune": c, "volume_totale": float(r.volumi_distretto_mese["Volume Fatturato (m3)"].sum())}
+        for c, r in _risultati_per_comune(None)
+    ]
+    return templates.TemplateResponse(request, "riepilogo.html", {
+        "request": request,
+        "pagina_attiva": "riepilogo",
+        "comuni_disponibili": comuni_disponibili,
+        "comune_selezionato": None,
+        "comune": None,
+        "riepilogo_comuni": riepilogo_comuni,
+    })
+
+
+@app.get("/pagine/diagnostica")
+def pagina_diagnostica(request: Request, comune: str | None = None):
+    """Stessi dati di /diagnostica, mostrati come pagina HTML — vedi
+    pagina_riepilogo per la logica del filtro Comune nell'header.
+    """
+    comuni_disponibili = _comuni_disponibili()
+
+    if not comune:
+        return templates.TemplateResponse(request, "diagnostica.html", {
+            "request": request,
+            "pagina_attiva": "diagnostica",
+            "comuni_disponibili": comuni_disponibili,
+            "comune_selezionato": None,
+            "comune": None,
+        })
+
+    trovati = list(_risultati_per_comune(comune))
+    if not trovati:
+        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+    comune_trovato, risultato = trovati[0]
+
+    utenze_scomparse_json = _tabella_json(risultato.utenze_scomparse)
+    utenze_scomparse_da_verificare = [
+        r for r in utenze_scomparse_json if r["Da Verificare"] == "Sì (era ancora attiva)"
+    ]
+
+    return templates.TemplateResponse(request, "diagnostica.html", {
+        "request": request,
+        "pagina_attiva": "diagnostica",
+        "comuni_disponibili": comuni_disponibili,
+        "comune_selezionato": comune_trovato,
+        "comune": comune_trovato,
+        "segnalazioni": _tabella_json(risultato.segnalazioni),
+        "anomalie_metodo_b": _tabella_json(risultato.anomalie_metodo_b),
+        "utenze_scomparse_da_verificare": utenze_scomparse_da_verificare,
+        "cessate_con_stima_finale": _tabella_json(risultato.cessate_con_stima_finale),
+    })

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titolo %}Fatturazione Utenze{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="titolo">Fatturazione Utenze</div>
+    <form class="filtri" method="get">
+      <label for="comune">Comune</label>
+      <select id="comune" name="comune" onchange="this.form.submit()">
+        <option value="" {% if not comune_selezionato %}selected{% endif %}>Tutti</option>
+        {% for c in comuni_disponibili %}
+        <option value="{{ c }}" {% if c == comune_selezionato %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </header>
+  <nav class="tabs">
+    <a href="/pagine/riepilogo{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+       class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Riepilogo</a>
+    <a href="/pagine/diagnostica{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+       class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica</a>
+  </nav>
+  <main>
+    {% block contenuto %}{% endblock %}
+  </main>
+  <footer>Fatturazione Utenze — Metodo B (differenza fisica tra letture reali consecutive)</footer>
+</body>
+</html>

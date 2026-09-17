@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block titolo %}Diagnostica — Fatturazione Utenze{% endblock %}
+{% block contenuto %}
+{% if comune %}
+  <h1>Diagnostica — {{ comune }}</h1>
+  <p class="nota-metodologica">
+    Anomalie da verificare a mano: distretti anomali/mancanti, letture escluse dal Metodo B (sentinella,
+    reset di contatore non marcati, ritmo di consumo assurdo), utenze scomparse senza un contratto
+    chiuso che lo spieghi, e utenze cessate la cui ultima lettura non è reale.
+  </p>
+
+  <div class="kpi-grid">
+    <div class="kpi {% if segnalazioni|length > 0 %}warn{% endif %}">
+      <div class="etichetta">Segnalazioni distretto</div>
+      <div class="valore">{{ segnalazioni|length }}</div>
+    </div>
+    <div class="kpi {% if anomalie_metodo_b|length > 0 %}warn{% endif %}">
+      <div class="etichetta">Anomalie Metodo B</div>
+      <div class="valore">{{ anomalie_metodo_b|length }}</div>
+    </div>
+    <div class="kpi {% if utenze_scomparse_da_verificare|length > 0 %}danger{% endif %}">
+      <div class="etichetta">Utenze scomparse da verificare</div>
+      <div class="valore">{{ utenze_scomparse_da_verificare|length }}</div>
+    </div>
+    <div class="kpi {% if cessate_con_stima_finale|length > 0 %}warn{% endif %}">
+      <div class="etichetta">Cessate con stima finale</div>
+      <div class="valore">{{ cessate_con_stima_finale|length }}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Utenze scomparse — ancora attive nell'ultima lettura nota (da verificare)</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Ultimo Stato</th><th>Ultima Data Lettura</th><th>Ultimo File</th></tr></thead>
+        <tbody>
+          {% for r in utenze_scomparse_da_verificare %}
+          <tr>
+            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td>{{ r["Indirizzo"] }}</td>
+            <td>{{ r["Ultimo Stato Servizio"] }}</td>
+            <td>{{ r["Ultima Data Lettura"] }}</td>
+            <td>{{ r["Ultimo File in cui Compare"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Segnalazioni — distretto anomalo o mancante</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto Riportato</th><th>Motivo</th><th>Stato Servizio</th></tr></thead>
+        <tbody>
+          {% for r in segnalazioni %}
+          <tr>
+            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td>{{ r["Indirizzo"] }}</td>
+            <td>{{ r["Distretto Riportato"] }}</td>
+            <td>{{ r["Motivo"] }}</td>
+            <td>{{ r["Stato Servizio"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Anomalie Metodo B — letture escluse dal calcolo</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Codice Servizio</th><th>Data Lettura</th><th>Tipo Lettura</th><th>Motivo</th></tr></thead>
+        <tbody>
+          {% for r in anomalie_metodo_b %}
+          <tr>
+            <td class="num">{{ r["CODICE_SERVIZIO"] }}</td>
+            <td>{{ r["DATA_LETTURA"] }}</td>
+            <td>{{ r["TIPO_LETTURA"] }}</td>
+            <td>{{ r["MOTIVO"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cessate con stima finale — mancava la lettura reale di chiusura</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto</th><th>Ultima Lettura (tipo)</th><th>Ultima Data Lettura</th></tr></thead>
+        <tbody>
+          {% for r in cessate_con_stima_finale %}
+          <tr>
+            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td>{{ r["Indirizzo"] }}</td>
+            <td>{{ r["Distretto"] }}</td>
+            <td>{{ r["Ultima Lettura (tipo)"] }}</td>
+            <td>{{ r["Ultima Data Lettura"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <h1>Diagnostica</h1>
+  <p class="nota-metodologica">Scegli un comune dal filtro in alto per vedere le anomalie da verificare.</p>
+{% endif %}
+{% endblock %}

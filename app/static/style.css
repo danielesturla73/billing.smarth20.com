@@ -1,0 +1,236 @@
+:root {
+  --ink: #0F2438;
+  --ink-2: #16324A;
+  --bg: #F5F8FA;
+  --surface: #FFFFFF;
+  --surface-2: #EFF3F6;
+  --border: #DCE4E9;
+  --border-strong: #C3CFD6;
+
+  --teal: #0E7C86;
+  --teal-dark: #0A5C63;
+  --teal-light: #E4F3F3;
+
+  --text: #152631;
+  --text-2: #57707B;
+  --text-muted: #8B9DA6;
+
+  --amber: #B9700B;
+  --amber-bg: #FBF1E0;
+
+  --red: #B3261E;
+  --red-bg: #FBEAE8;
+
+  --green: #1C7C4C;
+  --green-bg: #E7F5EE;
+
+  --font: 'IBM Plex Sans', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', 'SF Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+header {
+  background: linear-gradient(180deg, var(--ink), var(--ink-2));
+  color: #fff;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+header .titolo {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+header .filtri {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+header .filtri label {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.75);
+}
+
+.btn-ghost, header select {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+header select option { color: var(--text); }
+
+nav.tabs {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  gap: 4px;
+}
+
+nav.tabs a {
+  display: inline-block;
+  padding: 12px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+nav.tabs a.attivo {
+  color: var(--teal-dark);
+  border-bottom-color: var(--teal);
+}
+
+nav.tabs a:hover { color: var(--teal-dark); }
+
+main {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.nota-metodologica {
+  color: var(--text-2);
+  font-size: 12.5px;
+  margin: 0 0 20px;
+  max-width: 900px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.kpi .etichetta {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.kpi .valore {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.kpi.warn .valore { color: var(--amber); }
+.kpi.danger .valore { color: var(--red); }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 20px;
+}
+
+.panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 14px;
+}
+
+.avviso {
+  background: var(--amber-bg);
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+thead th {
+  text-align: left;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 8px 10px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+tbody tr:hover { background: var(--surface-2); }
+
+td.num, th.num {
+  font-family: var(--mono);
+  text-align: right;
+}
+
+.table-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.badge.stimato { background: var(--amber-bg); color: var(--amber); }
+.badge.real { background: var(--green-bg); color: var(--green); }
+.badge.nodata { background: var(--surface-2); color: var(--text-muted); }
+
+footer {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 24px;
+}
