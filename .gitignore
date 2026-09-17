@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+docx_build/
+archivio/*.csv
+archivio/*.db
+archivio/*.db-wal
+archivio/*.db-shm
+output/*.xlsx
+input/*.xlsx
+*.egg-info/
+.venv*/

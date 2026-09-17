@@ -1,0 +1,41 @@
+# Avvio: docker compose up -d --build
+# Richiede che la rete Docker condivisa esista già — vedi README_DOCKER.md
+# ("docker network create rete-interna-idrico"), da creare UNA VOLA SOLA
+# sulla VPS, prima del primo avvio.
+
+services:
+  billing:
+    build: .
+    container_name: billing
+    restart: unless-stopped
+    # Porta pubblicata solo per sviluppo/test locale (es. verificare da
+    # browser che il container risponda). In produzione, dietro un
+    # reverse proxy (come Caddy per WMS SmartH2O), si può anche togliere
+    # questa riga e lasciare che il traffico entri solo dalla rete Docker.
+    ports:
+      - "8010:8000"
+    volumes:
+      # Dati persistenti: sopravvivono a un riavvio/aggiornamento del
+      # container, perché vivono sul disco della VPS, non dentro l'immagine.
+      - ./archivio:/app/archivio
+      - ./input:/app/input
+      - ./output:/app/output
+    env_file:
+      - .env
+    networks:
+      - rete-interna-idrico
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # Rete condivisa con il container di WMS SmartH2O, così i due servizi si
+  # raggiungono per nome senza passare da internet (vedi project doc
+  # "riepilogo-progetto-wms-smarth2o.md", sezione 4.9). "external: true"
+  # vuol dire che questa rete NON viene creata da questo file — deve già
+  # esistere sulla VPS (creata una volta, condivisa da entrambe le app).
+  rete-interna-idrico:
+    external: true

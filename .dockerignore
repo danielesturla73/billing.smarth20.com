@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.git
+.gitignore
+.env
+docx_build/
+project_docs/
+archivio/
+input/
+output/
+*.xlsx
+*.csv
+README_DOCKER.md
