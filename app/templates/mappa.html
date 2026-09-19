@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block titolo %}Mappa — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Mappa distretti</h1>
+{% if confini_veri %}
+<p class="nota-metodologica">Confini reali importati da <code>project_docs/distretti_confini.geojson</code>.</p>
+{% else %}
+<p class="nota-metodologica">
+  I poligoni qui sotto sono ancora <strong>segnaposto</strong> (piccoli quadrati vicino al centro di ogni
+  comune), non i confini veri dei distretti — carica il GeoJSON vero dalla
+  <a href="/pagine/distretti">pagina Distretti</a> per sostituirli, senza altri cambi a questa pagina. Codice
+  e nome dei distretti sono comunque reali, presi da <code>project_docs/distretti_comuni.csv</code>.
+</p>
+{% endif %}
+
+<div class="panel">
+  <div class="filtri-grafico">
+    <label for="filtro-tema">Colora per</label>
+    <select id="filtro-tema">
+      <option value="affidabilita">Affidabilità del dato (ultimo mese)</option>
+      <option value="volume">Volume consumato (ultimo mese)</option>
+      <option value="segnalazioni">Segnalazioni aperte</option>
+    </select>
+  </div>
+  <div id="mappa" style="height:560px;border-radius:10px;overflow:hidden"></div>
+  <div id="legenda" style="display:flex;gap:18px;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-2)"></div>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  const GEOJSON = {{ geojson_demo | tojson }};
+  const DATI = {{ dati_tematici | tojson }};
+
+  // Palette WMS SmartH2O (le stesse variabili di style.css, ripetute qui
+  // in esadecimale perche' Leaflet disegna su <canvas>/SVG e non legge le
+  // custom property CSS del documento).
+  const TEAL_DARK = '#0A5C63';
+  const GRIGIO_NEUTRO = '#C3CFD6';
+  // Stessi 3 colori di stato gia' usati in Grafici (reale/provvisorio/
+  // interpolato) e in Diagnostica (ok/attenzione/anomalia) — coerenza
+  // visiva con il resto dell'app, non un quarto linguaggio di colore.
+  const VERDE = '#1C7C4C';
+  const AMBRA = '#B9700B';
+  const ROSSO = '#B3261E';
+  const TEAL_CHIARO = '#E4F3F3';
+
+  function interpolaColore(hexA, hexB, t) {
+    t = Math.max(0, Math.min(1, t));
+    const a = hexA.match(/\w\w/g).map(x => parseInt(x, 16));
+    const b = hexB.match(/\w\w/g).map(x => parseInt(x, 16));
+    return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
+  }
+
+  const volumeMassimo = Math.max(0, ...Object.values(DATI).map(v => v.volume || 0));
+
+  // Un colore per ogni tema, dato il dizionario DATI[codice_distretto]
+  // (puo' essere undefined: distretto di un comune non ancora caricato).
+  const TEMI = {
+    affidabilita: {
+      colore: function (v) {
+        if (!v || v.volume == null) return GRIGIO_NEUTRO;
+        if (v.pct_interpolato > 0) return ROSSO;
+        if (v.pct_provvisorio > 10) return AMBRA;
+        return VERDE;
+      },
+      legenda: [
+        [VERDE, 'Consolidato'], [AMBRA, 'Parzialmente provvisorio'],
+        [ROSSO, 'Contiene interpolato'], [GRIGIO_NEUTRO, 'Nessun dato'],
+      ],
+    },
+    volume: {
+      colore: function (v) {
+        if (!v || v.volume == null) return GRIGIO_NEUTRO;
+        return interpolaColore(TEAL_CHIARO, TEAL_DARK, volumeMassimo ? v.volume / volumeMassimo : 0);
+      },
+      legenda: [
+        [TEAL_CHIARO, 'Volume basso'], [TEAL_DARK, 'Volume alto'], [GRIGIO_NEUTRO, 'Nessun dato'],
+      ],
+    },
+    segnalazioni: {
+      colore: function (v) {
+        if (!v) return GRIGIO_NEUTRO;
+        const n = v.n_segnalazioni || 0;
+        if (n === 0) return VERDE;
+        if (n <= 3) return AMBRA;
+        return ROSSO;
+      },
+      legenda: [
+        [VERDE, 'Nessuna'], [AMBRA, '1-3 aperte'], [ROSSO, '4+ aperte'], [GRIGIO_NEUTRO, 'Nessun dato'],
+      ],
+    },
+  };
+
+  const selTema = document.getElementById('filtro-tema');
+  const legenda = document.getElementById('legenda');
+
+  const mappa = L.map('mappa', { zoomControl: true, attributionControl: true });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap',
+    maxZoom: 19,
+  }).addTo(mappa);
+
+  function stileCorrente(feature) {
+    const v = DATI[feature.properties.codice_distretto];
+    return {
+      color: TEAL_DARK,
+      weight: 1.5,
+      fillColor: TEMI[selTema.value].colore(v),
+      fillOpacity: 0.55,
+    };
+  }
+
+  function testoInfo(v) {
+    if (!v) return 'Nessun dato (comune non ancora caricato)';
+    let righe = [];
+    if (v.volume != null) {
+      righe.push(`Volume ${v.mese}: <strong>${v.volume.toLocaleString('it-IT')} m³</strong>`);
+      righe.push(`Reale ${v.pct_reale}% · Provvisorio ${v.pct_provvisorio}% · Interpolato ${v.pct_interpolato}%`);
+    }
+    righe.push(`Segnalazioni aperte: <strong>${v.n_segnalazioni}</strong>`);
+    return righe.join('<br>');
+  }
+
+  const strato = L.geoJSON(GEOJSON, {
+    style: stileCorrente,
+    onEachFeature: function (feature, layer) {
+      const p = feature.properties;
+      const v = DATI[p.codice_distretto];
+      const etichetta = () => `<strong style="font-family:'IBM Plex Mono',monospace">${p.codice_distretto}</strong><br>${p.nome_distretto}<br>${testoInfo(v)}`;
+      layer.bindTooltip(etichetta, { sticky: true, className: 'tooltip-distretto' });
+      layer.bindPopup(etichetta);
+      layer.on('mouseover', function () {
+        layer.setStyle({ fillOpacity: 0.8, weight: 2.5 });
+      });
+      layer.on('mouseout', function () {
+        strato.resetStyle(layer);
+      });
+    },
+  }).addTo(mappa);
+
+  function aggiornaLegenda() {
+    legenda.innerHTML = TEMI[selTema.value].legenda.map(([colore, testo]) =>
+      `<span style="display:inline-flex;align-items:center;gap:6px">
+         <span style="width:12px;height:12px;border-radius:3px;background:${colore};display:inline-block"></span>${testo}
+       </span>`
+    ).join('');
+  }
+
+  selTema.addEventListener('change', function () {
+    strato.setStyle(stileCorrente);
+    aggiornaLegenda();
+  });
+  aggiornaLegenda();
+
+  if (GEOJSON.features.length) {
+    mappa.fitBounds(strato.getBounds(), { padding: [24, 24] });
+  } else {
+    mappa.setView([45.15, 9.15], 10);
+  }
+})();
+</script>
+<style>
+  .leaflet-tooltip.tooltip-distretto, .leaflet-popup-content {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    font-size: 13px;
+    color: #152631;
+  }
+  .leaflet-container {
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+    background: #F5F8FA;
+  }
+</style>
+{% endblock %}

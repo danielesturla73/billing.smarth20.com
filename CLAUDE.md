@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-"Fatturazione Utenze" — a water-utility billing calculation service for Daniele. It reads quarterly meter-reading extracts from the Neta H2O CRM (one Excel file per comune/municipality) and computes the volume to bill per water district (`distretto`) per month, which eventually feeds the `district_billed` table of a separate, already-live app called **WMS SmartH2O**.
+"Analisi Consumi da Fatturazione" (formerly "Fatturazione Utenze") — a water-consumption analysis service for Daniele. The purpose is NOT billing: it is the water balance and leak reduction. It reads quarterly meter-reading extracts from the Neta H2O CRM (one Excel file per comune/municipality) and computes the billed/consumed volume per water district (`distretto`) per month, which eventually feeds the `district_billed` table of a separate, already-live app called **WMS SmartH2O**. WMS holds the inflow (immesso, daily/monthly) and night minimum flows, and does the top-down comparison inflow vs. billed: a monthly trend, consolidated once a year. Estimated (provisional) months are acceptable for the trend, as long as they are flagged and later upserted (see below). Names like `district_billed`, `Volume Fatturato (m3)` and `Import_WMS` stay unchanged (WMS format).
 
 The two apps are deliberately separate (see `project_docs/riepilogo-progetto-wms-smarth2o.md`, §4.7): no shared database, no shared container. This app is currently a bare skeleton (`/health` only) sitting next to a mature, fully-working calculation engine that isn't wired to any endpoint yet — that wiring is the main open work.
 

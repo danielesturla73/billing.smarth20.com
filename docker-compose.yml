@@ -20,6 +20,17 @@ services:
       - ./archivio:/app/archivio
       - ./input:/app/input
       - ./output:/app/output
+      # project_docs/ intera (esclusa dall'IMMAGINE di proposito — vedi
+      # Dockerfile/.dockerignore, sono appunti/specifiche non da spedire
+      # nel container — ma qui e' un volume, non una copia nell'immagine):
+      # montata in lettura/scrittura per i file che servono a runtime
+      # (distretti_comuni.csv, distretti_confini.geojson), cosi' sia
+      # Daniele a mano sulla VPS sia le pagine /pagine/distretti e
+      # /pagine/mappa possono leggerli/scriverli senza rebuild. Un'unica
+      # cartella invece di un file alla volta: ogni nuovo file di
+      # riferimento in project_docs/ funziona gia' senza toccare questo
+      # compose.
+      - ./project_docs:/app/project_docs
     env_file:
       - .env
     networks:

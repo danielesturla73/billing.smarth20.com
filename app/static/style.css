@@ -170,6 +170,25 @@ h1 {
   margin: 0 0 14px;
 }
 
+/* Pannelli a scomparsa (details/summary nativi, niente JS): stesso aspetto
+   di .panel h2, ma cliccabile per aprire/chiudere il contenuto. */
+details.panel > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  list-style: none;
+}
+
+details.panel:not([open]) > summary {
+  margin-bottom: 0;
+}
+
+details.panel > summary::-webkit-details-marker { display: none; }
+
+details.panel > summary::before { content: "▸ "; color: var(--text-2); }
+details.panel[open] > summary::before { content: "▾ "; color: var(--text-2); }
+
 .avviso {
   background: var(--amber-bg);
   color: var(--amber);
@@ -178,6 +197,43 @@ h1 {
   padding: 10px 14px;
   font-size: 12.5px;
   margin-bottom: 10px;
+}
+
+/* Elenco avvisi collassato di default (details/summary nativi, niente JS):
+   occupano molto spazio verticale, quindi si aprono solo a richiesta. */
+details.avvisi-collassabili {
+  margin-bottom: 20px;
+}
+
+details.avvisi-collassabili summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px 14px;
+  list-style: none;
+}
+
+details.avvisi-collassabili summary::-webkit-details-marker { display: none; }
+
+details.avvisi-collassabili summary::before { content: "▸ "; }
+details.avvisi-collassabili[open] summary::before { content: "▾ "; }
+
+details.avvisi-collassabili[open] summary {
+  border-radius: 8px 8px 0 0;
+}
+
+details.avvisi-collassabili .avviso {
+  border-radius: 0;
+  border-top: none;
+  margin-bottom: 0;
+}
+
+details.avvisi-collassabili .avviso:last-child {
+  border-radius: 0 0 8px 8px;
 }
 
 table {
@@ -211,6 +267,14 @@ td.num, th.num {
   text-align: right;
 }
 
+main a {
+  color: var(--teal-dark);
+}
+
+main a:hover {
+  text-decoration: none;
+}
+
 .table-scroll {
   max-height: 520px;
   overflow-y: auto;
@@ -227,6 +291,69 @@ td.num, th.num {
 .badge.stimato { background: var(--amber-bg); color: var(--amber); }
 .badge.real { background: var(--green-bg); color: var(--green); }
 .badge.nodata { background: var(--surface-2); color: var(--text-muted); }
+
+/* Grafici (Chart.js, vedi style-guide-wms-smarth2o.md sezione 6):
+   .chart-wrap ad altezza fissa cosi' Chart.js (responsive:true,
+   maintainAspectRatio:false) puo' riempirla senza far crescere la pagina
+   ad ogni ridisegno. */
+.chart-wrap {
+  height: 260px;
+  position: relative;
+}
+
+.chart-wrap.piccolo {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.filtri-grafico {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.filtri-grafico label {
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.storia-voce {
+  border-left: 4px solid var(--teal);
+  margin-bottom: 20px;
+}
+
+.storia-voce .data {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 6px;
+}
+
+.storia-voce ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.storia-voce li {
+  margin-bottom: 4px;
+}
+
+.filtri-grafico select {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+}
 
 footer {
   text-align: center;

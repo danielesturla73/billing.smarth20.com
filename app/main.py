@@ -1,5 +1,5 @@
 """
-Punto d'ingresso del servizio web di Fatturazione Utenze.
+Punto d'ingresso del servizio web di Analisi Consumi da Fatturazione.
 
 Stato al 17/09/2026: oltre al health-check ci sono un endpoint di upload
 delle estrazioni Neta H2O (/upload), endpoint di riepilogo/diagnostica in
@@ -25,10 +25,11 @@ cambia la logica. La persistenza (SQLite) e' in database.py.
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -38,12 +39,20 @@ import pandas as pd
 from app import database, motore_calcolo
 
 app = FastAPI(
-    title="Fatturazione Utenze",
-    description="Calcolo dei volumi fatturati per distretto idrico, a partire dalle estrazioni Neta H2O.",
+    title="Analisi Consumi da Fatturazione",
+    description="Consumi (da fatturazione) per distretto idrico, per il bilancio idrico e la riduzione delle perdite in WMS SmartH2O, a partire dalle estrazioni Neta H2O.",
     version="0.1.0",
 )
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+# Cache-busting per lo stylesheet: senza questo, il browser puo' tenere in
+# cache una versione vecchia di style.css dopo un deploy (stesso URL
+# /static/style.css ad ogni rebuild) e le modifiche CSS non si vedono senza
+# un refresh forzato. La versione e' la data di modifica del file, letta una
+# volta all'avvio del container.
+templates.env.globals["css_version"] = int(
+    (Path("app/static/style.css").stat().st_mtime)
+)
 
 # Percorso relativo alla working directory del processo ("input/"),
 # coerente con quello gia' usato da motore_calcolo.py e con i volumi
@@ -150,6 +159,91 @@ def _tabella_json(df: pd.DataFrame) -> list[dict]:
     return df.to_dict(orient="records")
 
 
+def _pivot_mese_distretto(volumi_distretto_mese: pd.DataFrame) -> dict:
+    """Trasforma Import_WMS (una riga per mese+distretto) in una tabella
+    incrociata per la pagina web: una riga per mese, una colonna per
+    distretto, totale di riga a destra — più compatta da leggere della
+    sequenza mese/distretto/mese/distretto originale. Il JSON di /riepilogo
+    resta invariato (vedi _tabella_json), questa è solo una vista per
+    riepilogo.html.
+    """
+    if volumi_distretto_mese.empty:
+        return {"distretti": [], "righe": []}
+
+    pivot = volumi_distretto_mese.pivot_table(
+        index="Mese", columns="Codice Distretto", values="Volume Fatturato (m3)",
+        aggfunc="sum", fill_value=0,
+    ).sort_index()
+
+    distretti = [str(d) for d in pivot.columns]
+    righe = []
+    for mese, valori in pivot.iterrows():
+        riga = {"Mese": str(mese)}
+        for distretto, valore in zip(distretti, valori):
+            riga[distretto] = round(float(valore), 2)
+        riga["Totale"] = round(float(valori.sum()), 2)
+        righe.append(riga)
+
+    return {"distretti": distretti, "righe": righe}
+
+
+def _data(valore) -> str:
+    """Formatta una data come YYYY-MM-DD, coerente con _tabella_json, per
+    le frasi costruite a mano in _anomalie_per_utenza (li' non si passa
+    dal DataFrame->JSON che fa gia' questa conversione)."""
+    return pd.Timestamp(valore).strftime("%Y-%m-%d") if pd.notnull(valore) else "?"
+
+
+def _anomalie_per_utenza(risultato, codice_servizio: int) -> list[str]:
+    """Raccoglie, per UNA utenza, le segnalazioni che la riguardano in
+    tutte e 5 le categorie mostrate da /pagine/diagnostica (non solo
+    Anomalie Metodo B), come frasi pronte da mostrare in cima a
+    /pagine/utenza. Richiesto da Daniele il 18/09/2026: quando si apre
+    un'utenza cliccando da una qualsiasi delle tabelle, si vuole vedere
+    subito perche' era segnalata, senza dover tornare indietro a
+    ricontrollare.
+    """
+    frasi = []
+
+    segnalazioni = risultato.segnalazioni[risultato.segnalazioni["Codice Servizio"] == codice_servizio]
+    for _, r in segnalazioni.iterrows():
+        frasi.append(f"Segnalazione distretto: {r['Motivo']} (distretto riportato: {r['Distretto Riportato']})")
+
+    anomalie_b = risultato.anomalie_metodo_b[risultato.anomalie_metodo_b["CODICE_SERVIZIO"] == codice_servizio]
+    for _, r in anomalie_b.iterrows():
+        frasi.append(f"Anomalia Metodo B del {_data(r['DATA_LETTURA'])}: {r['MOTIVO']}")
+
+    scomparse = risultato.utenze_scomparse[
+        (risultato.utenze_scomparse["Codice Servizio"] == codice_servizio)
+        & (risultato.utenze_scomparse["Da Verificare"] == "Sì (era ancora attiva)")
+    ]
+    for _, r in scomparse.iterrows():
+        frasi.append(
+            f"Utenza scomparsa: ancora attiva nell'ultima lettura nota ({_data(r['Ultima Data Lettura'])}, "
+            f"file {r['Ultimo File in cui Compare']}), ma non compare nel file più recente"
+        )
+
+    cessate = risultato.cessate_con_stima_finale[
+        risultato.cessate_con_stima_finale["Codice Servizio"] == codice_servizio
+    ]
+    for _, r in cessate.iterrows():
+        frasi.append(
+            f"Cessata con stima finale: ultima lettura ({r['Ultima Lettura (tipo)']}) del "
+            f"{_data(r['Ultima Data Lettura'])} non è reale, mancava la lettura di chiusura"
+        )
+
+    corrette_nodma = risultato.utenze_corrette_da_nodma[
+        risultato.utenze_corrette_da_nodma["Codice Servizio"] == codice_servizio
+    ]
+    for _, r in corrette_nodma.iterrows():
+        frasi.append(
+            f"Corretta da NODMA/ND a {r['Distretto Attuale']}: {r['Volume Escluso Permanentemente (m3)']:.2f} m³ "
+            f"dei mesi {r['Mesi Interessati']} restano esclusi da qualunque distretto per sempre"
+        )
+
+    return frasi
+
+
 def _risultati_per_comune(comune_filtro: str | None):
     """Ricalcola il Metodo B sull'archivio storico (SQLite) di ogni
     comune, uno alla volta (mai comuni diversi insieme: vedi /riepilogo
@@ -241,6 +335,7 @@ def diagnostica(comune: str | None = None):
             "utenze_scomparse": _tabella_json(risultato.utenze_scomparse),
             "cessate_con_stima_finale": _tabella_json(risultato.cessate_con_stima_finale),
             "trimestri_con_stime_provvisorie": _tabella_json(trimestre_provvisorio),
+            "utenze_corrette_da_nodma": _tabella_json(risultato.utenze_corrette_da_nodma),
         })
 
     if comune and not comuni_risultato:
@@ -272,6 +367,7 @@ def pagina_riepilogo(request: Request, comune: str | None = None):
         trimestri_provvisori = risultato.volumi_distretto_trimestre[
             risultato.volumi_distretto_trimestre["Contiene Stime Provvisorie"] == "Sì"
         ]["Trimestre"].nunique()
+        pivot = _pivot_mese_distretto(risultato.volumi_distretto_mese)
         return templates.TemplateResponse(request, "riepilogo.html", {
             "request": request,
             "pagina_attiva": "riepilogo",
@@ -282,7 +378,8 @@ def pagina_riepilogo(request: Request, comune: str | None = None):
             "volume_totale": float(risultato.volumi_distretto_mese["Volume Fatturato (m3)"].sum()),
             "n_mesi": int(risultato.volumi_distretto_mese["Mese"].nunique()),
             "trimestri_provvisori": int(trimestri_provvisori),
-            "volumi_distretto_mese": _tabella_json(risultato.volumi_distretto_mese),
+            "distretti": pivot["distretti"],
+            "righe_pivot": pivot["righe"],
         })
 
     riepilogo_comuni = [
@@ -335,4 +432,492 @@ def pagina_diagnostica(request: Request, comune: str | None = None):
         "anomalie_metodo_b": _tabella_json(risultato.anomalie_metodo_b),
         "utenze_scomparse_da_verificare": utenze_scomparse_da_verificare,
         "cessate_con_stima_finale": _tabella_json(risultato.cessate_con_stima_finale),
+        "utenze_corrette_da_nodma": _tabella_json(risultato.utenze_corrette_da_nodma),
+        "stato_chiusura_mesi": _tabella_json(risultato.stato_chiusura_mesi),
+    })
+
+
+@app.get("/pagine/utenza")
+def pagina_utenza(request: Request, comune: str, codice_servizio: int | None = None):
+    """Cronologia completa delle letture di UNA utenza (data, tipo,
+    lettura, indirizzo, distretto...), con le eventuali righe del Metodo B
+    (anomalie_metodo_b) che la riguardano evidenziate in cima. Pensata per
+    essere raggiunta cliccando un Codice Servizio dalla pagina di
+    diagnostica, per verificare un'anomalia senza dover interrogare il
+    database a mano (vedi conversazione con Daniele del 18/09/2026, caso
+    75768720).
+    """
+    if codice_servizio is None:
+        # Il filtro Comune nell'header (vedi base.html) invia un GET sulla
+        # stessa pagina con solo ?comune=: qui non basta a mostrare nulla
+        # di sensato, quindi si torna alla diagnostica di quel comune
+        # invece di rispondere con un errore di validazione.
+        return RedirectResponse(url=f"/pagine/diagnostica?comune={comune}")
+
+    comuni_disponibili = _comuni_disponibili()
+
+    with database.connessione() as conn:
+        letture_comune = database.carica_letture(conn, comune)
+    letture_utenza = letture_comune[letture_comune["CODICE_SERVIZIO"] == codice_servizio]
+    if letture_utenza.empty:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Nessuna lettura trovata per l'utenza {codice_servizio} nel comune '{comune}'",
+        )
+    letture_utenza = motore_calcolo._ordina_priorita_stessa_data(letture_utenza)
+    letture_utenza = letture_utenza.copy()
+    letture_utenza["_reale"] = letture_utenza["TIPO_LETTURA"].isin(motore_calcolo.TIPI_LETTURA_REALE)
+    ultima = letture_utenza.iloc[-1]
+
+    trovati = list(_risultati_per_comune(comune))
+    anomalie_utenza = []
+    if trovati:
+        _, risultato = trovati[0]
+        anomalie_utenza = _anomalie_per_utenza(risultato, codice_servizio)
+
+    return templates.TemplateResponse(request, "utenza.html", {
+        "request": request,
+        "pagina_attiva": None,
+        "comuni_disponibili": comuni_disponibili,
+        "comune_selezionato": comune,
+        "comune": comune,
+        "codice_servizio": codice_servizio,
+        "indirizzo": ultima["INDIRIZZO_UBICAZIONE"],
+        "cap": int(ultima["CAP_UBICAZIONE"]) if pd.notnull(ultima["CAP_UBICAZIONE"]) else None,
+        "distretto": ultima["DISTRETTO"],
+        "stato_servizio": ultima["STATO_SERVIZIO"],
+        "prodotto": ultima["PRODOTTO_CODICE"],
+        "anomalie_utenza": anomalie_utenza,
+        "letture": _tabella_json(letture_utenza[[
+            "DATA_LETTURA", "TIPO_LETTURA", "_reale", "LETTURA", "CONSUMO", "GG_LETT_PREC",
+            "STATO_LETTURA", "DISTRETTO", "FILE_ORIGINE",
+        ]]),
+    })
+
+
+@app.get("/pagine/grafici")
+def pagina_grafici(request: Request, comune: str | None = None):
+    """Grafici (Chart.js, vedi style-guide-wms-smarth2o.md) confermati da
+    Daniele il 18/09/2026: volumi mensili per distretto scomposti in
+    reale/provvisorio/interpolato, ripartizione consumi per classe d'uso,
+    classifica dei maggiori consumatori. I primi due grafici usano dataset
+    piccoli (poche righe per distretto/mese o per distretto/classe) e
+    vengono incorporati direttamente nella pagina; la classifica dei
+    maggiori consumatori no (fino a decine di migliaia di righe per
+    comune, una per utenza per mese) — quella viene ricalcolata a
+    richiesta da /api/top_consumatori quando si cambia il periodo.
+    """
+    comuni_disponibili = _comuni_disponibili()
+
+    if not comune:
+        return templates.TemplateResponse(request, "grafici.html", {
+            "request": request,
+            "pagina_attiva": "grafici",
+            "comuni_disponibili": comuni_disponibili,
+            "comune_selezionato": None,
+            "comune": None,
+        })
+
+    trovati = list(_risultati_per_comune(comune))
+    if not trovati:
+        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+    comune_trovato, risultato = trovati[0]
+
+    mesi_disponibili = sorted(str(m) for m in risultato.volumi_utenza_mese["Mese"].unique())
+    anni_disponibili = sorted({m[:4] for m in mesi_disponibili})
+
+    return templates.TemplateResponse(request, "grafici.html", {
+        "request": request,
+        "pagina_attiva": "grafici",
+        "comuni_disponibili": comuni_disponibili,
+        "comune_selezionato": comune_trovato,
+        "comune": comune_trovato,
+        "origine_mensile": _tabella_json(risultato.volumi_distretto_mese_origine),
+        "classe_uso": _tabella_json(risultato.statistiche_classe_uso),
+        "mesi_disponibili": mesi_disponibili,
+        "anni_disponibili": anni_disponibili,
+    })
+
+
+@app.get("/api/top_consumatori")
+def api_top_consumatori(comune: str, periodo: str, n: int = 10):
+    """Classifica dei maggiori consumatori per un mese ('YYYY-MM') o un
+    anno intero ('YYYY') — calcolata a richiesta su risultato.volumi_utenza_mese
+    (vedi pagina_grafici) invece che incorporata nella pagina, perche' quella
+    tabella e' granulare per singola utenza e puo' avere decine di migliaia
+    di righe per comune.
+    """
+    trovati = list(_risultati_per_comune(comune))
+    if not trovati:
+        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+    _, risultato = trovati[0]
+
+    df = risultato.volumi_utenza_mese
+    if df.empty:
+        return {"utenze": []}
+
+    if len(periodo) == 7:
+        selezione = df[df["Mese"].astype(str) == periodo]
+    elif len(periodo) == 4:
+        selezione = df[df["Mese"].dt.year == int(periodo)]
+    else:
+        raise HTTPException(status_code=422, detail="Periodo non valido: usa 'YYYY-MM' o 'YYYY'")
+
+    if selezione.empty:
+        return {"utenze": []}
+
+    top = (
+        selezione.groupby(["Codice Servizio", "Codice Distretto", "Classe d'uso"], as_index=False)["Volume (m3)"]
+        .sum()
+        .sort_values("Volume (m3)", ascending=False)
+        .head(n)
+    )
+
+    # L'indirizzo non e' in volumi_utenza_mese (vedi aggrega_utenza_mese):
+    # si recupera qui, dall'archivio grezzo, solo per le poche utenze in
+    # classifica (mai per l'intera tabella granulare) — stessa logica di
+    # "ultima lettura nota" gia' usata da pagina_utenza.
+    with database.connessione() as conn:
+        letture_comune = database.carica_letture(conn, comune)
+    indirizzi = (
+        letture_comune[letture_comune["CODICE_SERVIZIO"].isin(top["Codice Servizio"])]
+        .sort_values("DATA_LETTURA")
+        .groupby("CODICE_SERVIZIO")["INDIRIZZO_UBICAZIONE"]
+        .last()
+    )
+    top["Indirizzo"] = top["Codice Servizio"].map(indirizzi)
+
+    # Consumo medio giornaliero STIMATO: il volume del periodo selezionato
+    # diviso i giorni di calendario del periodo — e' una media, non una
+    # misura (lo stesso principio della proratazione mensile del Metodo B).
+    if len(periodo) == 7:
+        giorni_periodo = pd.Period(periodo, freq="M").days_in_month
+    else:
+        giorni_periodo = sum(m.days_in_month for m in selezione["Mese"].unique())
+    top["Consumo Medio Stimato (m3/giorno)"] = (top["Volume (m3)"] / giorni_periodo).round(2)
+
+    # Ritmo REALE: il m3/giorno dell'ULTIMA differenza tra due letture reali
+    # che ricade nel periodo selezionato, preso da riferimento_prodie (lo
+    # stesso foglio di controllo usato da calcola_periodi_metodo_b per ogni
+    # confronto del Metodo B — non una stima, la misura fisica vera).
+    # Se l'utenza non ha nessun confronto reale in quel periodo (solo stime
+    # provvisorie/interpolate), resta vuoto: non si inventa un valore.
+    rif = risultato.riferimento_prodie
+    if len(periodo) == 7:
+        rif_periodo = rif[rif["DATA_FINE"].dt.to_period("M").astype(str) == periodo]
+    else:
+        rif_periodo = rif[rif["DATA_FINE"].dt.year == int(periodo)]
+    ritmo_reale = (
+        rif_periodo[rif_periodo["CODICE_SERVIZIO"].isin(top["Codice Servizio"])]
+        .sort_values("DATA_FINE")
+        .groupby("CODICE_SERVIZIO")["M3_GIORNO"]
+        .last()
+    )
+    top["Ritmo Reale Ultima Lettura (m3/giorno)"] = top["Codice Servizio"].map(ritmo_reale)
+
+    return {"utenze": _tabella_json(top)}
+
+
+@app.get("/pagine/info")
+def pagina_info(request: Request, comune: str | None = None):
+    """Pagina statica (nessun ricalcolo, nessun dato per comune): spiega in
+    linguaggio semplice come funziona il Metodo B e come si leggono i
+    grafici, per chi usa l'app senza aver letto il codice o le specifiche.
+    Il filtro Comune nell'header resta visibile per coerenza di navigazione
+    ma non cambia nulla in questa pagina.
+    """
+    return templates.TemplateResponse(request, "info.html", {
+        "request": request,
+        "pagina_attiva": "info",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": comune,
+    })
+
+
+@app.get("/pagine/storia")
+def pagina_storia(request: Request, comune: str | None = None):
+    """Pagina statica con la cronologia di sviluppo del progetto — utile a
+    Daniele per ritrovare velocemente perche' un numero e' cambiato da una
+    sessione all'altra, senza dover leggere i commit git uno per uno.
+    """
+    return templates.TemplateResponse(request, "storia.html", {
+        "request": request,
+        "pagina_attiva": "storia",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": comune,
+    })
+
+
+def _pagina_distretti_contesto(
+    request: Request, modifica: str | None, comune: str | None = None,
+    errore_import=None, esito_import=None, errore_import_confini=None, esito_import_confini=None,
+) -> dict:
+    """Contesto comune a GET /pagine/distretti e a ogni azione (importa/
+    salva/elimina) che ri-renderizza la stessa pagina invece di fare un
+    redirect — cosi' un errore di import resta visibile senza perdersi in
+    un redirect.
+    """
+    df_mappa = motore_calcolo.carica_mappa_distretti_df()
+    riga_modifica = None
+    if modifica:
+        trovata = df_mappa[df_mappa["codice_distretto"] == modifica.strip().upper()]
+        if not trovata.empty:
+            riga_modifica = trovata.iloc[0].to_dict()
+
+    df_righe = df_mappa
+    if comune:
+        comune_norm = comune.strip().upper()
+        df_righe = df_mappa[
+            (df_mappa["comune_ufficiale"] == comune_norm)
+            | df_mappa["comuni_associabili"].str.split(";").apply(
+                lambda lista: comune_norm in [c.strip() for c in lista]
+            )
+        ]
+
+    return {
+        "request": request,
+        "pagina_attiva": "distretti",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": comune,
+        "righe": df_righe.to_dict(orient="records"),
+        "riga_modifica": riga_modifica,
+        "errore_import": errore_import,
+        "esito_import": esito_import,
+        "errore_import_confini": errore_import_confini,
+        "esito_import_confini": esito_import_confini,
+    }
+
+
+@app.get("/pagine/distretti")
+def pagina_distretti(request: Request, modifica: str | None = None, comune: str | None = None):
+    """Gestione dell'elenco ufficiale distretto -> comune usato da
+    classifica_distretto (vedi project_docs/distretti_comuni.csv): tabella
+    con un modulo per aggiungere/modificare/eliminare una riga alla volta,
+    più due moduli per importare file che Daniele già ha (l'elenco
+    distretto/comune, e i confini GeoJSON per la pagina Mappa) — richiesto
+    da Daniele il 18/09/2026.
+
+    ?modifica=<codice> pre-compila il modulo con la riga esistente.
+    ?comune=<nome> (il filtro Comune nell'header, come nelle altre pagine)
+    limita la tabella ai distretti di quel comune o a lui associabili —
+    prima veniva ignorato, mostrava sempre tutto l'elenco.
+    """
+    return templates.TemplateResponse(
+        request, "distretti.html", _pagina_distretti_contesto(request, modifica, comune)
+    )
+
+
+@app.post("/distretti/importa")
+async def importa_distretti(request: Request, file: UploadFile = File(...)):
+    """Importa (upsert per codice_distretto, non sovrascrive l'intero
+    elenco) un file che Daniele carica dalla pagina — vedi
+    motore_calcolo.importa_mappa_distretti per il riconoscimento delle
+    colonne. Un file con intestazioni non riconosciute non blocca nulla:
+    l'errore torna visibile in pagina con le colonne che sono state lette,
+    invece di un errore HTTP generico.
+    """
+    nome_originale = file.filename or "distretti.csv"
+    percorso_temp = Path("/tmp") / f"import_distretti_{int(time.time())}_{nome_originale}"
+    percorso_temp.write_bytes(await file.read())
+
+    errore = None
+    esito = None
+    try:
+        esito = motore_calcolo.importa_mappa_distretti(percorso_temp)
+    except ValueError as exc:
+        errore = str(exc)
+    except Exception as exc:
+        errore = f"File '{nome_originale}' non leggibile: {exc}"
+    finally:
+        percorso_temp.unlink(missing_ok=True)
+
+    return templates.TemplateResponse(
+        request, "distretti.html",
+        _pagina_distretti_contesto(request, modifica=None, errore_import=errore, esito_import=esito),
+    )
+
+
+@app.post("/distretti/importa-confini")
+async def importa_confini_endpoint(request: Request, file: UploadFile = File(...)):
+    """Importa il GeoJSON dei confini reali dei distretti (usato dalla
+    pagina Mappa al posto dei quadrati segnaposto) — vedi
+    motore_calcolo.importa_confini_distretti per il riconoscimento della
+    proprietà che contiene il codice distretto.
+    """
+    nome_originale = file.filename or "confini.geojson"
+    percorso_temp = Path("/tmp") / f"import_confini_{int(time.time())}_{nome_originale}"
+    percorso_temp.write_bytes(await file.read())
+
+    errore = None
+    esito = None
+    try:
+        esito = motore_calcolo.importa_confini_distretti(percorso_temp)
+    except ValueError as exc:
+        errore = str(exc)
+    except Exception as exc:
+        errore = f"File '{nome_originale}' non leggibile: {exc}"
+    finally:
+        percorso_temp.unlink(missing_ok=True)
+
+    return templates.TemplateResponse(
+        request, "distretti.html",
+        _pagina_distretti_contesto(
+            request, modifica=None, errore_import_confini=errore, esito_import_confini=esito
+        ),
+    )
+
+
+@app.post("/distretti/salva")
+def salva_distretto(
+    codice_distretto: str = Form(...),
+    comune_ufficiale: str = Form(...),
+    comuni_associabili: str = Form(""),
+    nome_distretto: str = Form(""),
+    comune: str = Form(""),
+):
+    """Aggiunge o aggiorna una riga dell'elenco (upsert per codice
+    distretto) dal modulo della pagina. comune e' solo il filtro attivo
+    nell'header (se c'era), per tornare alla stessa vista filtrata invece
+    di perderla ad ogni salvataggio."""
+    motore_calcolo.upsert_distretto(codice_distretto, comune_ufficiale, comuni_associabili, nome_distretto)
+    url = f"/pagine/distretti?comune={comune}" if comune else "/pagine/distretti"
+    return RedirectResponse(url=url, status_code=303)
+
+
+@app.post("/distretti/elimina")
+def elimina_distretto_endpoint(codice_distretto: str = Form(...), comune: str = Form("")):
+    """Rimuove una riga dall'elenco (il distretto torna a ricadere
+    sull'euristica del prefisso al prossimo ricalcolo)."""
+    motore_calcolo.elimina_distretto(codice_distretto)
+    url = f"/pagine/distretti?comune={comune}" if comune else "/pagine/distretti"
+    return RedirectResponse(url=url, status_code=303)
+
+
+# Coordinate approssimate (centro comune) SOLO per generare poligoni
+# segnaposto nella pagina Mappa, finche' non arriva il GeoJSON vero dei
+# confini distretto (vedi pagina_mappa) — da buttare via a quel punto.
+# Fonte: posizione approssimativa nota dei comuni in provincia di Pavia,
+# non un dato dell'archivio.
+_COORDINATE_DEMO_COMUNI = {
+    "BELGIOIOSO": (45.1517, 9.3739),
+    "MORTARA": (45.2508, 8.7379),
+    "BRONI": (45.0606, 9.2606),
+    "STRADELLA": (45.0763, 9.3011),
+}
+
+
+def _geojson_dimostrativo() -> dict:
+    """Poligoni SEGNAPOSTO (piccoli quadrati, non confini reali) per i
+    distretti dei comuni in _COORDINATE_DEMO_COMUNI, con codice e nome
+    presi dall'elenco vero (project_docs/distretti_comuni.csv) — in attesa
+    del GeoJSON vero dei confini, da collegare al posto di questi non
+    appena disponibile (vedi pagina_mappa).
+    """
+    df = motore_calcolo.carica_mappa_distretti_df()
+    features = []
+    lato = 0.006  # ~650m, solo per dare un'idea di scala, non e' un confine vero
+    for comune, (lat_centro, lon_centro) in _COORDINATE_DEMO_COMUNI.items():
+        distretti_comune = df[df["comune_ufficiale"] == comune].reset_index(drop=True)
+        n = len(distretti_comune)
+        if n == 0:
+            continue
+        colonne_griglia = max(1, int(n**0.5 + 0.5))
+        for i, riga in distretti_comune.iterrows():
+            riga_griglia, colonna_griglia = divmod(i, colonne_griglia)
+            lat0 = lat_centro + (riga_griglia - n / (2 * colonne_griglia)) * lato * 1.3
+            lon0 = lon_centro + (colonna_griglia - colonne_griglia / 2) * lato * 1.3
+            quadrato = [
+                [lon0, lat0], [lon0 + lato, lat0], [lon0 + lato, lat0 + lato],
+                [lon0, lat0 + lato], [lon0, lat0],
+            ]
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "codice_distretto": riga["codice_distretto"],
+                    "nome_distretto": riga["nome_distretto"] or riga["codice_distretto"],
+                    "comune": comune,
+                },
+                "geometry": {"type": "Polygon", "coordinates": [quadrato]},
+            })
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _dati_tematici_mappa() -> dict:
+    """Per ogni distretto con archivio caricato: volume e composizione
+    reale/provvisorio/interpolato dell'ultimo mese disponibile, più il
+    numero di segnalazioni aperte (Anomalie Metodo B + Cessate con stima
+    finale) — usati da /pagine/mappa per colorare i distretti (tema scelto
+    in pagina: affidabilità/volume/segnalazioni). I distretti di comuni non
+    ancora caricati restano fuori da questo dizionario: la mappa li mostra
+    in grigio neutro, "nessun dato", invece di fingere un valore.
+    """
+    dati: dict = {}
+    for comune, risultato in _risultati_per_comune(None):
+        origine = risultato.volumi_distretto_mese_origine
+        if not origine.empty:
+            ultimo_mese = origine.groupby("Codice Distretto")["Mese"].transform("max")
+            for _, r in origine[origine["Mese"] == ultimo_mese].iterrows():
+                totale = r["Reale (m3)"] + r["Provvisorio (m3)"] + r["Interpolato (m3)"]
+                dati[r["Codice Distretto"]] = {
+                    "comune": comune,
+                    "mese": str(r["Mese"]),
+                    "volume": round(totale, 2),
+                    "pct_reale": round(r["Reale (m3)"] / totale * 100, 1) if totale else 0,
+                    "pct_provvisorio": round(r["Provvisorio (m3)"] / totale * 100, 1) if totale else 0,
+                    "pct_interpolato": round(r["Interpolato (m3)"] / totale * 100, 1) if totale else 0,
+                    "n_segnalazioni": 0,
+                }
+
+        conteggio = pd.concat([
+            risultato.anomalie_metodo_b[["DISTRETTO"]].rename(columns={"DISTRETTO": "Codice Distretto"}),
+            risultato.cessate_con_stima_finale[["Distretto"]].rename(columns={"Distretto": "Codice Distretto"}),
+        ], ignore_index=True)["Codice Distretto"].value_counts()
+        for codice, n in conteggio.items():
+            if codice in dati:
+                dati[codice]["n_segnalazioni"] = int(n)
+            else:
+                dati[codice] = {
+                    "comune": comune, "mese": None, "volume": None,
+                    "pct_reale": None, "pct_provvisorio": None, "pct_interpolato": None,
+                    "n_segnalazioni": int(n),
+                }
+    return dati
+
+
+def _geojson_per_mappa() -> tuple[dict, bool]:
+    """Il GeoJSON da mostrare in /pagine/mappa: quello vero (importato da
+    /pagine/distretti, vedi motore_calcolo.importa_confini_distretti) se
+    esiste su disco, altrimenti i quadrati segnaposto. Restituisce anche
+    se e' quello vero, per il messaggio in pagina. Il nome_distretto viene
+    sempre preso dall'elenco distretti_comuni.csv (piu' facile da tenere
+    aggiornato che il GeoJSON), non da quello eventualmente nel GeoJSON.
+    """
+    if motore_calcolo.PERCORSO_CONFINI_DISTRETTI.exists():
+        dati = json.loads(motore_calcolo.PERCORSO_CONFINI_DISTRETTI.read_text(encoding="utf-8"))
+        nomi = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")["nome_distretto"]
+        for feature in dati.get("features", []):
+            codice = feature.get("properties", {}).get("codice_distretto", "")
+            feature["properties"]["nome_distretto"] = nomi.get(codice) or codice
+        return dati, True
+    return _geojson_dimostrativo(), False
+
+
+@app.get("/pagine/mappa")
+def pagina_mappa(request: Request):
+    """Mappa distretti — Leaflet 1.9.4, stile/palette WMS SmartH2O.
+    Confermata da Daniele il 18/09/2026 dopo revisione del prototipo, ora
+    in menu. Usa il GeoJSON vero dei confini se e' stato importato da
+    /pagine/distretti, altrimenti i quadrati segnaposto (vedi
+    _geojson_per_mappa) — nessun altro cambio alla pagina in nessuno dei
+    due casi, stessa struttura Feature/properties attesa dal template.
+    """
+    geojson, confini_veri = _geojson_per_mappa()
+    return templates.TemplateResponse(request, "mappa.html", {
+        "request": request,
+        "pagina_attiva": "mappa",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": None,
+        "geojson_demo": geojson,
+        "confini_veri": confini_veri,
+        "dati_tematici": _dati_tematici_mappa(),
     })

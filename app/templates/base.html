@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block titolo %}Fatturazione Utenze{% endblock %}</title>
+  <title>{% block titolo %}Analisi Consumi da Fatturazione{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
 </head>
 <body>
   <header>
-    <div class="titolo">Fatturazione Utenze</div>
+    <div class="titolo">Analisi Consumi da Fatturazione</div>
     <form class="filtri" method="get">
       <label for="comune">Comune</label>
       <select id="comune" name="comune" onchange="this.form.submit()">
@@ -26,10 +26,20 @@
        class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Riepilogo</a>
     <a href="/pagine/diagnostica{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
        class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica</a>
+    <a href="/pagine/grafici{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+       class="{% if pagina_attiva == 'grafici' %}attivo{% endif %}">Grafici</a>
+    <a href="/pagine/distretti"
+       class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
+    <a href="/pagine/mappa"
+       class="{% if pagina_attiva == 'mappa' %}attivo{% endif %}">Mappa</a>
+    <a href="/pagine/info{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+       class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Info</a>
+    <a href="/pagine/storia{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+       class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Storia</a>
   </nav>
   <main>
     {% block contenuto %}{% endblock %}
   </main>
-  <footer>Fatturazione Utenze — Metodo B (differenza fisica tra letture reali consecutive)</footer>
+  <footer>Analisi Consumi da Fatturazione — Metodo B (differenza fisica tra letture reali consecutive)</footer>
 </body>
 </html>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block titolo %}Riepilogo — Fatturazione Utenze{% endblock %}
+{% block titolo %}Riepilogo — Analisi Consumi da Fatturazione{% endblock %}
 {% block contenuto %}
 {% if comune %}
   <h1>Riepilogo — {{ comune }}</h1>
@@ -10,14 +10,19 @@
     confermi: possono cambiare in un ricalcolo futuro.
   </p>
 
-  {% for w in warning %}
-  <div class="avviso">{{ w }}</div>
-  {% endfor %}
+  {% if warning %}
+  <details class="avvisi-collassabili">
+    <summary>{{ warning|length }} {{ "avviso" if warning|length == 1 else "avvisi" }} da verificare</summary>
+    {% for w in warning %}
+    <div class="avviso">{{ w }}</div>
+    {% endfor %}
+  </details>
+  {% endif %}
 
   <div class="kpi-grid">
     <div class="kpi">
       <div class="etichetta">Volume totale periodo</div>
-      <div class="valore">{{ "{:,.0f}".format(volume_totale) }} m³</div>
+      <div class="valore">{{ "{:.0f}".format(volume_totale) }} m³</div>
     </div>
     <div class="kpi">
       <div class="etichetta">Mesi affidabili</div>
@@ -30,18 +35,22 @@
   </div>
 
   <div class="panel">
-    <h2>Import_WMS — volume fatturato per distretto e mese</h2>
+    <h2>Import_WMS — volume consumato per distretto e mese</h2>
     <div class="table-scroll">
       <table>
         <thead>
-          <tr><th>Mese</th><th>Distretto</th><th class="num">Volume (m³)</th></tr>
+          <tr>
+            <th>Mese</th>
+            {% for d in distretti %}<th class="num">{{ d }}</th>{% endfor %}
+            <th class="num">Totale</th>
+          </tr>
         </thead>
         <tbody>
-          {% for r in volumi_distretto_mese %}
+          {% for r in righe_pivot %}
           <tr>
             <td>{{ r["Mese"] }}</td>
-            <td>{{ r["Codice Distretto"] }}</td>
-            <td class="num">{{ "{:,.2f}".format(r["Volume Fatturato (m3)"]) }}</td>
+            {% for d in distretti %}<td class="num">{{ "{:.0f}".format(r[d]) }}</td>{% endfor %}
+            <td class="num"><strong>{{ "{:.0f}".format(r["Totale"]) }}</strong></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -55,7 +64,7 @@
     {% for c in riepilogo_comuni %}
     <a class="kpi" style="text-decoration:none;color:inherit;display:block" href="/pagine/riepilogo?comune={{ c.comune }}">
       <div class="etichetta">{{ c.comune }}</div>
-      <div class="valore">{{ "{:,.0f}".format(c.volume_totale) }} m³</div>
+      <div class="valore">{{ "{:.0f}".format(c.volume_totale) }} m³</div>
     </a>
     {% endfor %}
   </div>

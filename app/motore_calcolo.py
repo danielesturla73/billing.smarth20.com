@@ -32,11 +32,18 @@ GESTIONE DISTRETTO
     1) escluso dal totale del distretto (per non sporcare il bilancio),
     2) elencato nel foglio "Segnalazioni" del file di output, per la
        verifica manuale da parte dell'ufficio tecnico.
+  ECCEZIONE: se il codice è nell'elenco ufficiale distretto→comune
+  (project_docs/distretti_comuni.csv, mantenuto a mano da Daniele) come
+  associabile al comune di questa estrazione — un distretto di un comune
+  limitrofo che serve legittimamente anche punti di questo comune — è
+  considerato valido, non un errore. Vedi classifica_distretto e
+  carica_mappa_distretti_comuni.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
 import re
 from calendar import monthrange
 from dataclasses import dataclass, field
@@ -44,6 +51,18 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+
+# Elenco ufficiale distretto -> comune (con eventuali comuni limitrofi a
+# cui il distretto e' legittimamente associabile), mantenuto a mano da
+# Daniele — esportato/copiato da WMS SmartH2O quando serve (le due app
+# restano deliberatamente separate, niente database condiviso: vedi
+# classifica_distretto). Se un codice non compare qui, o compare con
+# comune_ufficiale vuoto, si ricade sull'euristica del prefisso.
+PERCORSO_MAPPA_DISTRETTI = Path("project_docs/distretti_comuni.csv")
+# GeoJSON dei confini reali dei distretti (una Feature per distretto),
+# usato dalla pagina Mappa al posto dei quadrati segnaposto quando esiste
+# — vedi importa_confini_distretti.
+PERCORSO_CONFINI_DISTRETTI = Path("project_docs/distretti_confini.geojson")
 
 COLONNE_ATTESE = [
     "CODICE_SERVIZIO", "LEGAMI_FORNITURA", "PRODOTTO_CODICE",
@@ -84,6 +103,10 @@ class RisultatoElaborazione:
     coefficiente_punta: pd.DataFrame              # coefficiente di punta stagionale (portata mese di punta / portata media) per distretto
     cessate_con_stima_finale: pd.DataFrame        # utenze chiuse la cui ultima lettura non e' reale (anomalia)
     riepilogo_file: pd.DataFrame                  # una riga per file caricato
+    volumi_distretto_mese_origine: pd.DataFrame   # volume mensile per distretto, scomposto reale/provvisorio/interpolato (per i grafici)
+    volumi_utenza_mese: pd.DataFrame              # volume mensile per singola utenza (per la classifica dei maggiori consumatori)
+    utenze_corrette_da_nodma: pd.DataFrame        # utenze passate da NODMA/ND a un distretto vero, con il volume rimasto escluso per sempre
+    stato_chiusura_mesi: pd.DataFrame             # per mese: lotto di fatturazione girato (Chiuso/Aperto/Non determinabile), vedi calcola_stato_chiusura_mesi
     warning: list[str] = field(default_factory=list)
 
 
@@ -128,7 +151,244 @@ def _prefisso_dominante(distretti: pd.Series) -> str:
     return prefissi.value_counts().idxmax()
 
 
-def classifica_distretto(df: pd.DataFrame) -> pd.DataFrame:
+def carica_mappa_distretti_comuni(percorso: str | Path = PERCORSO_MAPPA_DISTRETTI) -> dict:
+    """Legge PERCORSO_MAPPA_DISTRETTI: codice_distretto -> (comune_ufficiale,
+    frozenset comuni_associabili). Un CSV mantenuto a mano da Daniele, non
+    generato dall'app. Formato (intestazione richiesta):
+
+        codice_distretto,comune_ufficiale,comuni_associabili
+        DBLG01,BELGIOIOSO,
+        DMR01,MORTARA,BELGIOIOSO
+
+    comuni_associabili e' una lista separata da ';' di comuni limitrofi a
+    cui QUEL distretto puo' legittimamente appartenere anche se compare in
+    un'estrazione di un altro comune (es. una frazione alimentata dalla
+    rete del comune vicino) — senza finire segnalato come anomalia. Una
+    riga con comune_ufficiale vuoto (codice noto ma non ancora
+    classificato) viene ignorata, non trattata come "nessun comune": si
+    ricade sull'euristica del prefisso per quel codice, come se la riga
+    non ci fosse.
+
+    Se il file non esiste (o e' vuoto/non ancora creato), restituisce un
+    dizionario vuoto — classifica_distretto ricade allora SEMPRE
+    sull'euristica del prefisso, comportamento identico a prima
+    dell'introduzione di questo file (richiesto da Daniele il 18/09/2026,
+    vedi specifiche 6.1: l'elenco ufficiale comuni/distretti mancava).
+    """
+    percorso = Path(percorso)
+    if not percorso.exists():
+        return {}
+    df = pd.read_csv(percorso, dtype=str, keep_default_na=False)
+    mappa = {}
+    for _, riga in df.iterrows():
+        codice = riga.get("codice_distretto", "").strip().upper()
+        comune_ufficiale = riga.get("comune_ufficiale", "").strip().upper()
+        if not codice or not comune_ufficiale:
+            continue
+        associabili = frozenset(
+            c.strip().upper() for c in riga.get("comuni_associabili", "").split(";") if c.strip()
+        )
+        mappa[codice] = (comune_ufficiale, associabili)
+    return mappa
+
+
+COLONNE_MAPPA_DISTRETTI = ["codice_distretto", "nome_distretto", "comune_ufficiale", "comuni_associabili"]
+
+
+def carica_mappa_distretti_df(percorso: str | Path = PERCORSO_MAPPA_DISTRETTI) -> pd.DataFrame:
+    """Come carica_mappa_distretti_comuni, ma restituisce il DataFrame
+    grezzo (una riga per codice, comuni_associabili come stringa separata
+    da ';', comune_ufficiale eventualmente vuoto) invece del dizionario
+    gia' pronto per classifica_distretto — usato dalla pagina di gestione
+    /pagine/distretti per mostrare e modificare il file riga per riga.
+    """
+    percorso = Path(percorso)
+    if not percorso.exists():
+        return pd.DataFrame(columns=COLONNE_MAPPA_DISTRETTI)
+    df = pd.read_csv(percorso, dtype=str, keep_default_na=False)
+    for col in COLONNE_MAPPA_DISTRETTI:
+        if col not in df.columns:
+            df[col] = ""
+    return df[COLONNE_MAPPA_DISTRETTI].sort_values("codice_distretto").reset_index(drop=True)
+
+
+def salva_mappa_distretti_df(df: pd.DataFrame, percorso: str | Path = PERCORSO_MAPPA_DISTRETTI) -> None:
+    """Scrive il DataFrame (stesse 3 colonne di COLONNE_MAPPA_DISTRETTI) su
+    disco, sovrascrivendo il file — usata da upsert/elimina/importa, mai
+    direttamente dalle pagine web.
+    """
+    percorso = Path(percorso)
+    percorso.parent.mkdir(parents=True, exist_ok=True)
+    df[COLONNE_MAPPA_DISTRETTI].sort_values("codice_distretto").to_csv(percorso, index=False)
+
+
+def upsert_distretto(
+    codice_distretto: str, comune_ufficiale: str, comuni_associabili: str = "",
+    nome_distretto: str = "", percorso: str | Path = PERCORSO_MAPPA_DISTRETTI,
+) -> None:
+    """Aggiunge o aggiorna (per codice_distretto) una riga dell'elenco —
+    usata dal modulo "aggiungi/modifica" di /pagine/distretti. nome_distretto
+    e' solo descrittivo (mai usato da classifica_distretto, che lavora sul
+    codice): aiuta a leggere la tabella senza dover ricordare a memoria
+    cosa e' ogni codice.
+    """
+    codice = codice_distretto.strip().upper()
+    if not codice:
+        raise ValueError("Codice distretto obbligatorio")
+    df = carica_mappa_distretti_df(percorso)
+    df = df[df["codice_distretto"].str.upper() != codice]
+    nuova_riga = pd.DataFrame([{
+        "codice_distretto": codice,
+        "nome_distretto": nome_distretto.strip(),
+        "comune_ufficiale": comune_ufficiale.strip().upper(),
+        "comuni_associabili": comuni_associabili.strip().upper(),
+    }])
+    salva_mappa_distretti_df(pd.concat([df, nuova_riga], ignore_index=True), percorso)
+
+
+def elimina_distretto(codice_distretto: str, percorso: str | Path = PERCORSO_MAPPA_DISTRETTI) -> None:
+    """Rimuove una riga dall'elenco per codice_distretto (nessun errore se
+    non esisteva gia')."""
+    codice = codice_distretto.strip().upper()
+    df = carica_mappa_distretti_df(percorso)
+    salva_mappa_distretti_df(df[df["codice_distretto"].str.upper() != codice], percorso)
+
+
+_ALIAS_COLONNE_IMPORT = {
+    "codice_distretto": {"codice_distretto", "codice distretto", "distretto", "cod_distretto", "codice"},
+    "nome_distretto": {"nome_distretto", "nome distretto", "denominazione distretto", "descrizione distretto", "nome"},
+    "comune_ufficiale": {"comune_ufficiale", "comune ufficiale", "comune", "comune_principale", "comune principale"},
+    "comuni_associabili": {
+        "comuni_associabili", "comuni associabili", "associabili",
+        "comuni_limitrofi", "comuni limitrofi", "comuni_associati", "comuni associati",
+        "altro comune associabile", "altro_comune_associabile", "comune associabile", "comune_associabile",
+    },
+}
+
+
+def importa_mappa_distretti(
+    percorso_file: str | Path, percorso_destinazione: str | Path = PERCORSO_MAPPA_DISTRETTI
+) -> dict:
+    """Importa un file CSV o Excel che Daniele gia' ha (es. esportato da
+    WMS SmartH2O) e lo fonde (upsert per codice_distretto — le righe nuove
+    aggiornano quelle esistenti, non sovrascrivono l'intero elenco) con
+    quello gia' presente. Riconosce le intestazioni anche con nomi simili
+    al nostro formato (maiuscole/minuscole, spazi, "Comune" invece di
+    "comune_ufficiale", ecc. — vedi _ALIAS_COLONNE_IMPORT); la colonna
+    comuni_associabili e' opzionale, le altre due no. Se non riesce a
+    riconoscere codice_distretto/comune_ufficiale solleva ValueError con
+    l'elenco delle colonne trovate nel file, cosi' si capisce subito cosa
+    aggiustare (richiesto da Daniele il 18/09/2026, non si conosceva in
+    anticipo il formato esatto del file che avrebbe caricato).
+    """
+    percorso_file = Path(percorso_file)
+    if percorso_file.suffix.lower() in (".xlsx", ".xls"):
+        grezzo = pd.read_excel(percorso_file, dtype=str)
+    else:
+        # sep=None + engine="python" fa riconoscere da solo il separatore:
+        # un export Excel in locale italiano usa quasi sempre ';', non ','
+        # (la virgola e' il separatore decimale in italiano) — scoperto sul
+        # primo file reale caricato da Daniele il 18/09/2026.
+        grezzo = pd.read_csv(percorso_file, dtype=str, keep_default_na=False, sep=None, engine="python")
+    grezzo.columns = [str(c).strip() for c in grezzo.columns]
+    grezzo = grezzo.fillna("")
+
+    colonne_minuscole = {c.lower().strip(): c for c in grezzo.columns}
+    mappa_colonne = {}
+    for standard, varianti in _ALIAS_COLONNE_IMPORT.items():
+        trovata = next((colonne_minuscole[v] for v in varianti if v in colonne_minuscole), None)
+        if trovata:
+            mappa_colonne[standard] = trovata
+
+    mancanti = [c for c in ("codice_distretto", "comune_ufficiale") if c not in mappa_colonne]
+    if mancanti:
+        raise ValueError(
+            f"Non riesco a riconoscere le colonne {mancanti} nel file '{percorso_file.name}'. "
+            f"Colonne trovate: {', '.join(grezzo.columns) or '(nessuna)'}"
+        )
+
+    pulito = pd.DataFrame({
+        "codice_distretto": grezzo[mappa_colonne["codice_distretto"]].astype(str).str.strip().str.upper(),
+        "nome_distretto": (
+            grezzo[mappa_colonne["nome_distretto"]].astype(str).str.strip()
+            if "nome_distretto" in mappa_colonne else ""
+        ),
+        "comune_ufficiale": grezzo[mappa_colonne["comune_ufficiale"]].astype(str).str.strip().str.upper(),
+        "comuni_associabili": (
+            grezzo[mappa_colonne["comuni_associabili"]].astype(str).str.strip().str.upper()
+            if "comuni_associabili" in mappa_colonne else ""
+        ),
+    })
+    pulito = pulito[pulito["codice_distretto"] != ""]
+    if pulito.empty:
+        raise ValueError(f"Nessuna riga con un codice distretto valido nel file '{percorso_file.name}'")
+
+    esistente = carica_mappa_distretti_df(percorso_destinazione)
+    combinato = pd.concat([esistente, pulito], ignore_index=True).drop_duplicates(
+        subset="codice_distretto", keep="last"
+    )
+    salva_mappa_distretti_df(combinato, percorso_destinazione)
+
+    return {"righe_importate": len(pulito), "righe_totali": len(combinato)}
+
+
+_ALIAS_PROPRIETA_CODICE_GEOJSON = {
+    "codice_distretto", "codice distretto", "codice", "distretto", "cod_distretto", "distretto_codice",
+    # Nomi tipici di un export GIS/ArcGIS (es. "DMA.json" caricato da
+    # Daniele il 18/09/2026: OBJECTID, GisId, GisDescription, GisCode...).
+    "giscode", "gis_code", "gis code", "gis_codice",
+}
+
+
+def importa_confini_distretti(
+    percorso_file: str | Path, percorso_destinazione: str | Path = PERCORSO_CONFINI_DISTRETTI
+) -> dict:
+    """Importa un GeoJSON (FeatureCollection, una Feature per distretto,
+    poligono o multipoligono) con i confini reali — usato dalla pagina
+    Mappa al posto dei quadrati segnaposto, non appena presente su disco.
+
+    Riconosce da solo quale proprieta' di ogni feature contiene il codice
+    distretto (stessi alias di _ALIAS_PROPRIETA_CODICE_GEOJSON, es.
+    'codice', 'DISTRETTO'...) e la copia dentro properties.codice_distretto
+    su OGNI feature, cosi' il template della mappa cerca sempre lo stesso
+    nome di campo indipendentemente da come si chiamava nel file originale
+    (sovrascrive l'intero file, a differenza dell'upsert del CSV: i confini
+    non si "fondono" riga per riga, un nuovo file e' sempre la versione
+    completa e definitiva). Se non riesce a riconoscerla solleva ValueError
+    con le proprieta' trovate nella prima feature, per capire come
+    sistemare (richiesto da Daniele il 18/09/2026).
+    """
+    percorso_file = Path(percorso_file)
+    dati = json.loads(percorso_file.read_text(encoding="utf-8"))
+    if dati.get("type") != "FeatureCollection" or not dati.get("features"):
+        raise ValueError(
+            f"Il file '{percorso_file.name}' non è un GeoJSON FeatureCollection con almeno una feature"
+        )
+
+    prima_proprieta = dati["features"][0].get("properties") or {}
+    proprieta_minuscole = {str(k).lower().strip(): k for k in prima_proprieta}
+    proprieta_codice = next(
+        (proprieta_minuscole[a] for a in _ALIAS_PROPRIETA_CODICE_GEOJSON if a in proprieta_minuscole), None
+    )
+    if not proprieta_codice:
+        raise ValueError(
+            "Non riesco a riconoscere quale proprietà contiene il codice distretto nel file "
+            f"'{percorso_file.name}'. Proprietà trovate nella prima feature: "
+            f"{', '.join(prima_proprieta.keys()) or '(nessuna)'}"
+        )
+
+    for feature in dati["features"]:
+        codice = str((feature.get("properties") or {}).get(proprieta_codice, "")).strip().upper()
+        feature.setdefault("properties", {})["codice_distretto"] = codice
+
+    percorso_destinazione = Path(percorso_destinazione)
+    percorso_destinazione.parent.mkdir(parents=True, exist_ok=True)
+    percorso_destinazione.write_text(json.dumps(dati, ensure_ascii=False), encoding="utf-8")
+
+    return {"n_feature": len(dati["features"]), "proprieta_usata": proprieta_codice}
+
+
+def classifica_distretto(df: pd.DataFrame, mappa_distretti: dict | None = None) -> pd.DataFrame:
     """Aggiunge le colonne CATEGORIA_DISTRETTO e MOTIVO_SEGNALAZIONE.
 
     CATEGORIA_DISTRETTO puo' essere:
@@ -141,23 +401,38 @@ def classifica_distretto(df: pd.DataFrame) -> pd.DataFrame:
     Il codice usato da Neta H2O per "punto non distrettualizzato" non e'
     uguale ovunque: a Belgioioso/Mortara e' il testo letterale "NO
     DISTRETTO", ma Daniele ha confermato che altri comuni possono usare
-    convenzioni diverse (es. "NODMA"). Finche' non arriva l'elenco
-    ufficiale comuni/distretti (vedi specifiche, sezione 6.1), si usa
-    un'euristica piu' larga: qualunque codice che inizia per "NO" (case
-    sparse/non distrettualizzato, per convenzione) e non e' il prefisso
-    valido del comune viene trattato come case_sparse, non anomalia.
-    Andra' sostituita da un controllo esatto contro l'elenco ufficiale
-    quando sara' disponibile.
+    convenzioni diverse (es. "NODMA") — qualunque codice che inizia per
+    "NO" viene trattato come case_sparse, non anomalia.
+
+    Per i codici che NON iniziano per "NO", la classificazione usa PRIMA
+    l'elenco ufficiale (vedi carica_mappa_distretti_comuni): un codice
+    riconosciuto e' 'valido' se il suo comune ufficiale e' quello di questa
+    estrazione (comune_dominante(df)) O se questo comune e' tra i suoi
+    comuni_associabili (es. una frazione alimentata dal comune vicino) —
+    altrimenti e' 'anomalia' (codice di un altro comune, non associato: un
+    errore vero, quasi sempre). Un codice ASSENTE dall'elenco (o presente
+    con comune_ufficiale vuoto) ricade sull'euristica del prefisso
+    dominante del file, come prima di avere l'elenco (richiesto da Daniele
+    il 18/09/2026: distinguere errore vero da comune limitrofo legittimo
+    non era possibile solo col prefisso).
     """
     df = df.copy()
     prefisso = _prefisso_dominante(df["DISTRETTO"])
+    if mappa_distretti is None:
+        mappa_distretti = carica_mappa_distretti_comuni()
+    comune_corrente = comune_dominante(df).strip().upper()
 
     def categoria(val: str) -> str:
-        if prefisso and val.startswith(prefisso):
-            return "valido"
         val_pulito = str(val).strip().upper()
         if val_pulito.startswith("NO") and val_pulito not in ("", "NAN"):
             return "case_sparse"
+        if val_pulito in mappa_distretti:
+            comune_ufficiale, associabili = mappa_distretti[val_pulito]
+            if comune_ufficiale == comune_corrente or comune_corrente in associabili:
+                return "valido"
+            return "anomalia"
+        if prefisso and val.startswith(prefisso):
+            return "valido"
         return "anomalia"
 
     df["CATEGORIA_DISTRETTO"] = df["DISTRETTO"].apply(categoria)
@@ -165,8 +440,16 @@ def classifica_distretto(df: pd.DataFrame) -> pd.DataFrame:
     def motivo(row):
         if row["CATEGORIA_DISTRETTO"] != "anomalia":
             return ""
-        if row["DISTRETTO"] in ("*", "nan", ""):
+        distretto = str(row["DISTRETTO"]).strip().upper()
+        if distretto in ("*", "NAN", ""):
             return "Codice distretto mancante o non valido"
+        if distretto in mappa_distretti:
+            comune_ufficiale, _ = mappa_distretti[distretto]
+            return (
+                f"Distretto '{row['DISTRETTO']}' appartiene ufficialmente a {comune_ufficiale}, "
+                f"non a {comune_corrente} ne' a un suo comune associabile — verificare con Neta H2O "
+                "se e' un errore o va aggiunto come associabile in project_docs/distretti_comuni.csv"
+            )
         return f"Distretto '{row['DISTRETTO']}' non appartiene al comune di questa estrazione (prefisso atteso '{prefisso}')"
 
     df["MOTIVO_SEGNALAZIONE"] = df.apply(motivo, axis=1)
@@ -203,6 +486,16 @@ TIPI_LETTURA_REALE = frozenset({
 # interrompono sempre la catena, non si calcola mai una differenza di
 # lettura tra un contatore e l'altro.
 TIPI_INIZIO_CONTATORE = frozenset({"INIZIALE ESCLUSO", "INIZIALE INCLUSO"})
+
+# LEGAMI_FORNITURA: quasi sempre "INDIFFERENTE" (contatore indipendente),
+# ma puo' essere "PADRE" (misura il consumo TOTALE di un condominio) o
+# "FIGLIO" (sotto-contatore interno, il suo consumo e' gia' incluso in
+# quello del padre — confermato da Daniele il 18/09/2026). Un FIGLIO non va
+# mai fatturato separatamente: verrebbe contato due volte nel totale del
+# distretto, una nel padre e una nel figlio. Vedi elabora_dataframe, dove
+# le righe FIGLIO sono escluse prima di calcola_periodi_metodo_b (restano
+# comunque nell'archivio, solo escluse dal Metodo B).
+LEGAME_FIGLIO = "FIGLIO"
 
 # Ordine di priorità per letture con la STESSA data (es. RIMOZIONE PER
 # CAMBIO e INIZIALE ESCLUSO/INCLUSO dello stesso giorno): prima si chiude
@@ -254,9 +547,11 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     1. Le letture si dividono in SEGMENTI delimitati dai cambi di
        contatore (TIPI_INIZIO_CONTATORE apre un segmento nuovo): non si
        confrontano mai letture di contatori diversi.
-    2. Dentro ogni segmento, la prima lettura nota (di qualunque tipo) è
-       il punto di partenza (BASE): non genera consumo da sola, serve solo
-       come riferimento — non sappiamo cosa è successo prima di lei.
+    2. Dentro ogni segmento, la prima lettura NON sentinella (di qualunque
+       tipo, vedi LETTURA_SENTINELLA_MIN — le sentinella in testa vengono
+       scartate e finiscono tra le anomalie) è il punto di partenza (BASE):
+       non genera consumo da sola, serve solo come riferimento — non
+       sappiamo cosa è successo prima di lei.
     3. Ogni lettura REALE (TIPI_LETTURA_REALE) con una LETTURA valida (non
        sentinella, vedi LETTURA_SENTINELLA_MIN) è un'ancora: il consumo tra
        due ancore consecutive (o tra la base e la prima ancora) è la
@@ -272,11 +567,28 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     6. PROTEZIONE aggiunta dopo aver trovato reset di contatore NON
        marcati da INIZIALE/RIMOZIONE (la LETTURA scende bruscamente senza
        nessun segnale esplicito nel file): se la differenza tra due ancore
-       risulta NEGATIVA, non è un consumo valido (un contatore dell'acqua
-       non torna mai indietro fuori da un cambio). Il periodo viene
-       escluso dal totale e finisce nel secondo DataFrame restituito
-       (anomalie), invece che nel calcolo. L'ancora si sposta comunque
-       alla nuova lettura, per non propagare l'errore in avanti.
+       REALI consecutive risulta NEGATIVA, la LETTURA in se' non e' presa
+       per buona (un contatore dell'acqua non torna mai indietro fuori da
+       un cambio) — ma il periodo NON si azzera piu': si STIMA con il
+       ritmo medio storico (m3/giorno) calcolato sugli altri periodi validi
+       (differenza reale-reale) della STESSA utenza, applicato ai giorni
+       del periodo. Se l'utenza non ha nessun periodo storico valido da cui
+       ricavare un ritmo (es. il reset e' nel primissimo segmento noto), il
+       periodo resta escluso (0) come prima. In entrambi i casi finisce
+       comunque nel secondo DataFrame restituito (anomalie), da verificare
+       a mano — stimarlo non lo rende meno sospetto, solo meno probabile
+       che sia zero. L'ancora si sposta comunque alla nuova lettura, per
+       non propagare l'errore in avanti (richiesto da Daniele il
+       18/09/2026, caso di verifica: utenza 53886970 — un reset non
+       marcato non significa che l'utenza abbia consumato zero in quei
+       giorni).
+       Se invece l'ancora precedente era la BASE del segmento ed era una
+       STIMA (non una reale), una differenza negativa NON è un'anomalia:
+       è la prima reale che corregge (conguaglia) una stima per eccesso,
+       cosa normalissima (vedi 2.4/2.10) — non finisce tra le anomalie da
+       verificare con Neta H2O, solo nel riferimento, senza generare
+       consumo per quel primo intervallo (richiesto da Daniele il
+       18/09/2026, caso di verifica: utenza 75768720).
 
     Restituisce (periodi, anomalie, riferimento): periodi pronto per
     _ripartisci_su_mesi; anomalie con le differenze negative escluse, da
@@ -306,13 +618,66 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     for _, gruppo_righe in itertools.groupby(tutte_le_righe, key=lambda r: r.CODICE_SERVIZIO):
         righe = list(gruppo_righe)
         segmento: list = []
+        # Periodi "differenza letture reali" (OK) di QUESTA utenza, tenuti
+        # separati dal periodi globale finche' non sono stati chiusi tutti
+        # i segmenti: servono a calcolare il ritmo medio storico
+        # dell'utenza (vedi sotto, pendenti_reset), quindi non possono
+        # mescolarsi con le stime provvisorie ne' con quelli di altre
+        # utenze.
+        periodi_utenza: list = []
+        # Periodi con reset di contatore non marcato (differenza negativa
+        # tra due ancore REALI): non si escludono piu' a zero, si stimano
+        # con il ritmo medio storico dell'utenza — ma quel ritmo si conosce
+        # solo DOPO aver chiuso tutti i segmenti dell'utenza, quindi restano
+        # "pendenti" fino ad allora (richiesto da Daniele il 18/09/2026,
+        # caso di verifica: utenza 53886970 — un reset non marcato non
+        # significa che l'utenza abbia consumato zero in quei giorni).
+        pendenti_reset: list = []
 
         def chiudi_segmento(segmento):
             if not segmento:
                 return
+            # Scarta eventuali letture sentinella (LETTURA >=
+            # LETTURA_SENTINELLA_MIN) in TESTA al segmento prima di
+            # scegliere la base: altrimenti un valore spazzatura (es.
+            # 9999989, lo stesso placeholder "lettura non disponibile" di
+            # Neta H2O visto altrove come 999999/9999999) diventava
+            # l'ancora di partenza senza mai essere controllato — il
+            # controllo sentinella esiste gia' per le letture DENTRO il
+            # segmento, ma la base ne era esente per design (vedi punto 2
+            # sotto). La prima reale successiva, confrontata con
+            # quell'ancora spazzatura, risultava "diminuita, probabile
+            # reset contatore non marcato": non era un reset, era la base
+            # stessa non valida (richiesto da Daniele il 18/09/2026, caso
+            # di verifica: utenza 53787788).
+            indice_base = 0
+            while indice_base < len(segmento) and segmento[indice_base].LETTURA >= LETTURA_SENTINELLA_MIN:
+                scartata = segmento[indice_base]
+                anomalie.append({
+                    "CODICE_SERVIZIO": scartata.CODICE_SERVIZIO, "DATA_LETTURA": scartata.DATA_LETTURA,
+                    "LETTURA": scartata.LETTURA, "TIPO_LETTURA": scartata.TIPO_LETTURA,
+                    "MOTIVO": "Lettura sentinella (valore non valido, ignorata)",
+                    "DISTRETTO": scartata.DISTRETTO, "FILE_ORIGINE": scartata.FILE_ORIGINE,
+                })
+                indice_base += 1
+            if indice_base >= len(segmento):
+                return  # tutto il segmento era sentinella: nessun punto di partenza utilizzabile
+            segmento = segmento[indice_base:]
+
             base = segmento[0]
             ancora_lettura, ancora_data = base.LETTURA, base.DATA_LETTURA
             indice_ultima_ancora = 0  # indice in segmento dell'ultima ancora reale (0 = base)
+            # Se la base del segmento e' una stima (non sappiamo cosa e'
+            # successo prima di lei), una prima reale piu' bassa la sta
+            # semplicemente correggendo (conguaglio) — non e' un reset di
+            # contatore: la protezione sotto (delta<0 -> "probabile reset
+            # non marcato") va applicata solo quando ANCHE l'ancora
+            # precedente era gia' una lettura reale (vedi 2.10: scoperta e
+            # validata sulle diminuzioni tra due reali consecutive, non
+            # stima->reale). Richiesto da Daniele il 18/09/2026 dopo aver
+            # verificato il caso 75768720 (stima 1369 il 31/08, reale 1365
+            # il 10/11: normalissimo, la stima puo' essere per eccesso).
+            ancora_e_reale = base.TIPO_LETTURA in TIPI_LETTURA_REALE
 
             for indice, riga in enumerate(segmento[1:], start=1):
                 e_reale = riga.TIPO_LETTURA in TIPI_LETTURA_REALE
@@ -328,18 +693,33 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                     giorni = (riga.DATA_LETTURA - ancora_data).days
                     delta = riga.LETTURA - ancora_lettura
                     ritmo = (delta / giorni) if giorni > 0 else 0
-                    if giorni > 0 and delta < 0:
-                        anomalie.append({
+                    if giorni > 0 and delta < 0 and ancora_e_reale:
+                        # Non si esclude piu' a zero: si accantona, e si
+                        # risolve DOPO aver chiuso tutti i segmenti
+                        # dell'utenza (vedi pendenti_reset piu' sopra),
+                        # cosi' si puo' stimare con il ritmo medio storico
+                        # dell'utenza invece di attribuire zero consumo.
+                        pendenti_reset.append({
                             "CODICE_SERVIZIO": riga.CODICE_SERVIZIO, "DATA_LETTURA": riga.DATA_LETTURA,
                             "LETTURA": riga.LETTURA, "TIPO_LETTURA": riga.TIPO_LETTURA,
-                            "MOTIVO": f"Lettura diminuita rispetto alla precedente ({ancora_lettura}->{riga.LETTURA}), probabile reset contatore non marcato",
-                            "DISTRETTO": riga.DISTRETTO, "FILE_ORIGINE": riga.FILE_ORIGINE,
+                            "ANCORA_LETTURA": ancora_lettura, "GIORNI": giorni, "DELTA": delta,
+                            "LOCALITA": riga.LOCALITA, "DISTRETTO": riga.DISTRETTO,
+                            "CATEGORIA_DISTRETTO": riga.CATEGORIA_DISTRETTO,
+                            "PRODOTTO_CODICE": riga.PRODOTTO_CODICE, "FILE_ORIGINE": riga.FILE_ORIGINE,
                         })
+                    elif giorni > 0 and delta < 0:
+                        # Ancora precedente non reale (stima iniziale del
+                        # segmento): la reale la corregge, non e' un'anomalia
+                        # da verificare con Neta H2O — solo tracciata nel
+                        # foglio di riferimento per trasparenza, senza
+                        # generare consumo per questo primo intervallo (non
+                        # sappiamo cosa sia successo davvero prima della
+                        # prima lettura reale).
                         riferimento.append({
                             "CODICE_SERVIZIO": riga.CODICE_SERVIZIO, "DATA_FINE": riga.DATA_LETTURA,
                             "GIORNI": giorni, "VOLUME_M3": delta, "M3_GIORNO": round(ritmo, 2),
                             "LOCALITA": riga.LOCALITA, "DISTRETTO": riga.DISTRETTO, "FILE_ORIGINE": riga.FILE_ORIGINE,
-                            "ESITO": "Escluso: lettura diminuita (probabile reset contatore non marcato)",
+                            "ESITO": "Escluso: la reale corregge una stima iniziale (nessun consumo attribuito, non e' un'anomalia)",
                         })
                     elif giorni > 0 and ritmo > MC_GIORNO_SANITA_MASSIMA:
                         anomalie.append({
@@ -355,7 +735,7 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                             "ESITO": "Escluso: ritmo implausibile (sopra soglia di sanita')",
                         })
                     elif giorni > 0:
-                        periodi.append({
+                        periodi_utenza.append({
                             "CODICE_SERVIZIO": riga.CODICE_SERVIZIO, "DATA_FINE": riga.DATA_LETTURA,
                             "GIORNI": giorni, "VOLUME_M3": delta,
                             "LOCALITA": riga.LOCALITA, "DISTRETTO": riga.DISTRETTO,
@@ -370,6 +750,7 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
                             "ESITO": "OK",
                         })
                     ancora_lettura, ancora_data = riga.LETTURA, riga.DATA_LETTURA
+                    ancora_e_reale = True
                     indice_ultima_ancora = indice
                 # le stimate/assimilate "in mezzo" tra due ancore reali non
                 # fanno nulla qui: restano cancellate, l'ancora non si
@@ -416,6 +797,60 @@ def calcola_periodi_metodo_b(df_tutti: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
             else:
                 segmento.append(riga)
         chiudi_segmento(segmento)
+
+        # Tutti i segmenti dell'utenza sono chiusi: periodi_utenza contiene
+        # ora tutte le differenze reale-reale valide (le stime provvisorie
+        # in coda sono gia' finite direttamente in periodi, non contano per
+        # il ritmo: non sono una misura fisica). Da qui il ritmo medio
+        # storico, usato per stimare i periodi con reset non marcato invece
+        # di escluderli a zero.
+        giorni_ok = sum(p["GIORNI"] for p in periodi_utenza)
+        volume_ok = sum(p["VOLUME_M3"] for p in periodi_utenza)
+        ritmo_medio_utenza = (volume_ok / giorni_ok) if giorni_ok > 0 else None
+
+        for pend in pendenti_reset:
+            if ritmo_medio_utenza is not None:
+                volume_stimato = round(ritmo_medio_utenza * pend["GIORNI"], 2)
+                periodi_utenza.append({
+                    "CODICE_SERVIZIO": pend["CODICE_SERVIZIO"], "DATA_FINE": pend["DATA_LETTURA"],
+                    "GIORNI": pend["GIORNI"], "VOLUME_M3": volume_stimato,
+                    "LOCALITA": pend["LOCALITA"], "DISTRETTO": pend["DISTRETTO"],
+                    "CATEGORIA_DISTRETTO": pend["CATEGORIA_DISTRETTO"],
+                    "PRODOTTO_CODICE": pend["PRODOTTO_CODICE"], "FILE_ORIGINE": pend["FILE_ORIGINE"],
+                    "ORIGINE": "stima (reset contatore non marcato, interpolata dal ritmo storico dell'utenza)",
+                })
+                motivo = (
+                    f"Lettura diminuita rispetto alla precedente ({pend['ANCORA_LETTURA']}->{pend['LETTURA']}), "
+                    f"probabile reset contatore non marcato — periodo STIMATO con il ritmo medio storico "
+                    f"dell'utenza ({ritmo_medio_utenza:.2f} m3/giorno: {volume_stimato} m3), da verificare"
+                )
+                esito = f"Stimato con il ritmo medio dell'utenza ({ritmo_medio_utenza:.2f} m3/giorno, reset contatore non marcato)"
+                volume_riferimento = volume_stimato
+            else:
+                # Nessun periodo valido pregresso per questa utenza (es. il
+                # reset e' nel primissimo segmento noto): nessun ritmo da
+                # cui stimare, resta escluso come prima della modifica.
+                motivo = (
+                    f"Lettura diminuita rispetto alla precedente ({pend['ANCORA_LETTURA']}->{pend['LETTURA']}), "
+                    f"probabile reset contatore non marcato — nessun periodo storico valido per stimarlo, escluso"
+                )
+                esito = "Escluso: lettura diminuita (probabile reset contatore non marcato, nessun ritmo storico disponibile per stimare)"
+                volume_riferimento = pend["DELTA"]
+            anomalie.append({
+                "CODICE_SERVIZIO": pend["CODICE_SERVIZIO"], "DATA_LETTURA": pend["DATA_LETTURA"],
+                "LETTURA": pend["LETTURA"], "TIPO_LETTURA": pend["TIPO_LETTURA"],
+                "MOTIVO": motivo,
+                "DISTRETTO": pend["DISTRETTO"], "FILE_ORIGINE": pend["FILE_ORIGINE"],
+            })
+            riferimento.append({
+                "CODICE_SERVIZIO": pend["CODICE_SERVIZIO"], "DATA_FINE": pend["DATA_LETTURA"],
+                "GIORNI": pend["GIORNI"], "VOLUME_M3": volume_riferimento,
+                "M3_GIORNO": round(volume_riferimento / pend["GIORNI"], 2) if pend["GIORNI"] > 0 else 0,
+                "LOCALITA": pend["LOCALITA"], "DISTRETTO": pend["DISTRETTO"], "FILE_ORIGINE": pend["FILE_ORIGINE"],
+                "ESITO": esito,
+            })
+
+        periodi.extend(periodi_utenza)
 
     colonne = [
         "CODICE_SERVIZIO", "DATA_FINE", "GIORNI", "VOLUME_M3", "LOCALITA", "DISTRETTO",
@@ -484,6 +919,205 @@ def flag_mesi_provvisori(df_prorata_b: pd.DataFrame) -> pd.DataFrame:
     return flag
 
 
+def trova_utenze_corrette_da_nodma(df_prorata_b: pd.DataFrame) -> pd.DataFrame:
+    """Individua le utenze la cui classificazione di distretto e' cambiata
+    nella storia dell'archivio da non distrettualizzata/anomala (NODMA/ND,
+    vedi classifica_distretto) a un distretto vero — tipicamente perche'
+    Neta H2O corregge un errore di anagrafica dopo essere stata avvisata,
+    cosa che spesso richiede mesi (richiesto da Daniele il 18/09/2026).
+
+    NON e' un'anomalia nel calcolo: il periodo che si CHIUDE con la prima
+    lettura reale del distretto corretto viene gia' attribuito (proratato
+    sui mesi giusti) al nuovo distretto in automatico, grazie al ricalcolo
+    completo ad ogni caricamento — vedi calcola_periodi_metodo_b, "il
+    distretto della lettura di chiusura vince". Il punto da segnalare e'
+    un altro: i periodi CHIUSI PRIMA della correzione (quando l'utenza era
+    ancora NODMA/ND) restano esclusi da qualunque distretto per sempre,
+    ANCHE DOPO la correzione — la deduplica dell'archivio (vedi
+    database.aggiorna_letture: a parita' di chiave vince la riga gia'
+    presente) non li aggiornerebbe nemmeno ricaricando uno storico corretto.
+    """
+    colonne = [
+        "Codice Servizio", "Distretto Attuale", "Volume Escluso Permanentemente (m3)",
+        "Mesi Interessati", "N. Mesi",
+    ]
+    if df_prorata_b.empty:
+        return pd.DataFrame(columns=colonne)
+
+    per_utenza_categorie = df_prorata_b.groupby("CODICE_SERVIZIO")["CATEGORIA_DISTRETTO"].apply(set)
+    interessate = per_utenza_categorie[
+        per_utenza_categorie.apply(lambda s: "valido" in s and bool(s & {"case_sparse", "anomalia"}))
+    ].index
+    if len(interessate) == 0:
+        return pd.DataFrame(columns=colonne)
+
+    righe = []
+    for codice, gruppo in df_prorata_b[df_prorata_b["CODICE_SERVIZIO"].isin(interessate)].groupby("CODICE_SERVIZIO"):
+        valido = gruppo[gruppo["CATEGORIA_DISTRETTO"] == "valido"]
+        non_valido = gruppo[gruppo["CATEGORIA_DISTRETTO"] != "valido"]
+        if valido.empty or non_valido.empty:
+            continue
+        # Solo i mesi non validi PRIMA del primo mese valido: sono quelli
+        # rimasti chiusi mentre l'utenza era ancora NODMA/ND, quindi
+        # permanentemente esclusi da un distretto. Un eventuale mese non
+        # valido dopo il primo valido (dato ballerino) non e' il caso
+        # descritto da Daniele, resta fuori da questa segnalazione.
+        primo_mese_valido = valido["MESE"].min()
+        persi = non_valido[non_valido["MESE"] < primo_mese_valido]
+        if persi.empty:
+            continue
+        righe.append({
+            "Codice Servizio": codice,
+            "Distretto Attuale": valido.sort_values("MESE").iloc[-1]["DISTRETTO"],
+            "Volume Escluso Permanentemente (m3)": round(persi["VOLUME_MESE_M3"].sum(), 2),
+            "Mesi Interessati": ", ".join(str(m) for m in sorted(persi["MESE"].unique())),
+            "N. Mesi": persi["MESE"].nunique(),
+        })
+
+    if not righe:
+        return pd.DataFrame(columns=colonne)
+    return pd.DataFrame(righe)[colonne].sort_values("Volume Escluso Permanentemente (m3)", ascending=False)
+
+
+def _bucket_origine(origine: str) -> str:
+    """Raggruppa il campo ORIGINE di un periodo del Metodo B (vedi
+    calcola_periodi_metodo_b) in una delle 3 categorie usate ovunque nelle
+    statistiche/grafici: 'Reale (m3)' (differenza fisica tra letture
+    reali), 'Provvisorio (m3)' (stima in attesa di conferma, si
+    autocorregge da sola) o 'Interpolato (m3)' (stima da reset di
+    contatore non marcato, non si autocorregge da sola).
+    """
+    if origine == "differenza letture reali":
+        return "Reale (m3)"
+    if origine.startswith("stima provvisoria"):
+        return "Provvisorio (m3)"
+    return "Interpolato (m3)"
+
+
+def mese_max_statistiche(df_prorata_b: pd.DataFrame, soglia_pct_reale: float = 85.0) -> pd.Period | None:
+    """L'ultimo mese (andando a ritroso dal piu' recente) con una quota di
+    volume REALE sopra soglia_pct_reale — il segnale che il lotto di
+    letture per quel periodo si e' gia' chiuso. Si ferma al primo mese che
+    supera la soglia: i mesi precedenti a quello restano dentro anche se
+    singolarmente piu' bassi (rumore normale nella serie), solo la CODA
+    finale ancora aperta viene esclusa.
+
+    Usato per tagliare la coda in statistiche/grafici (MAI Import_WMS):
+    un lotto trimestrale di letture non ancora arrivato per l'ultimo
+    periodo fa apparire quei mesi con un volume basso e poco affidabile
+    (richiesto da Daniele il 18/09/2026, caso di verifica: Belgioioso,
+    marzo/aprile 2026 scesi al 80,8%/23,8% di reale, contro l'86-99% dei
+    mesi precedenti). NON e' lo stesso problema del "cold start" iniziale
+    (vedi _mese_dopo_primo_trimestre): li' il volume e' basso perche'
+    manca ancora storia PRIMA, qui perche' manca la chiusura DOPO — due
+    meccanismi distinti e non sovrapponibili: verificato che la % Reale
+    dei primissimi mesi di un archivio nuovo e' gia' alta (98-99%), il
+    cold start non abbassa l'affidabilita', solo il totale.
+
+    Restituisce None se non c'e' nessun mese sopra soglia — il chiamante
+    allora non applica nessun taglio, coerente con "non si inventa un
+    confronto quando manca il dato".
+    """
+    valide = df_prorata_b[df_prorata_b["CATEGORIA_DISTRETTO"] == "valido"]
+    if valide.empty:
+        return None
+    valide = valide.copy()
+    valide["_bucket"] = valide["ORIGINE"].apply(_bucket_origine)
+    per_mese = valide.groupby(["MESE", "_bucket"])["VOLUME_MESE_M3"].sum().unstack("_bucket", fill_value=0.0)
+    for col in ("Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"):
+        if col not in per_mese.columns:
+            per_mese[col] = 0.0
+    totale = per_mese.sum(axis=1)
+    pct_reale = (per_mese["Reale (m3)"] / totale * 100).where(totale > 0)
+
+    for mese in sorted(pct_reale.index, reverse=True):
+        if pd.notna(pct_reale[mese]) and pct_reale[mese] >= soglia_pct_reale:
+            return mese
+    return None
+
+
+def aggrega_origine_mensile(
+    df_prorata_b: pd.DataFrame, mese_min: pd.Period | None, mese_max: pd.Period | None
+) -> pd.DataFrame:
+    """Come volumi_distretto_mese, ma scompone il volume di ogni (Mese,
+    Distretto) per ORIGINE (vedi calcola_periodi_metodo_b) in 3 colonne:
+    Reale (differenza fisica tra letture reali), Provvisorio (stima ancora
+    in attesa di una reale che la confermi, si autocorregge da sola) e
+    Interpolato (stima da reset di contatore non marcato, NON si
+    autocorregge da sola — resta cosi' finche' non si verifica il dato con
+    Neta H2O). Pensata per il grafico mensile impilato della pagina
+    /pagine/grafici (richiesto da Daniele il 18/09/2026): la % di stimato
+    non e' un indicatore unico perche' le due categorie hanno un percorso
+    di risoluzione diverso (vedi conversazione), quindi restano separate
+    fin da qui invece di essere sommate in un solo "% stimato".
+    """
+    colonne = ["Mese", "Codice Distretto", "Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"]
+    if df_prorata_b.empty:
+        return pd.DataFrame(columns=colonne)
+
+    valide = df_prorata_b
+    if mese_min is not None and mese_max is not None:
+        valide = valide[(valide["MESE"] >= mese_min) & (valide["MESE"] <= mese_max)]
+    if valide.empty:
+        return pd.DataFrame(columns=colonne)
+
+    # Include ANCHE case sparse (NODMA) e distretto anomalo/mancante (ND) —
+    # vedi _distretto_per_statistiche: a differenza di Import_WMS, qui sono
+    # utili a fini statistici (richiesto da Daniele il 18/09/2026).
+    valide = valide.copy()
+    valide["DISTRETTO"] = [
+        _distretto_per_statistiche(cat, dist)
+        for cat, dist in zip(valide["CATEGORIA_DISTRETTO"], valide["DISTRETTO"])
+    ]
+    valide["_bucket"] = valide["ORIGINE"].apply(_bucket_origine)
+
+    pivot = (
+        valide.groupby(["MESE", "DISTRETTO", "_bucket"])["VOLUME_MESE_M3"]
+        .sum()
+        .unstack("_bucket", fill_value=0.0)
+        .reset_index()
+        .rename(columns={"MESE": "Mese", "DISTRETTO": "Codice Distretto"})
+    )
+    for col in ("Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"):
+        if col not in pivot.columns:
+            pivot[col] = 0.0
+        pivot[col] = pivot[col].round(2)
+    return pivot[colonne].sort_values(["Mese", "Codice Distretto"])
+
+
+def aggrega_utenza_mese(
+    df_prorata_b: pd.DataFrame, mese_min: pd.Period | None, mese_max: pd.Period | None
+) -> pd.DataFrame:
+    """Volume mensile per SINGOLA utenza (solo mesi affidabili, solo
+    distretti validi — stessa finestra e stesso filtro degli altri
+    risultati). Non finisce mai nel foglio Excel/nel JSON dei totali per
+    distretto: serve solo come base per la classifica dei maggiori
+    consumatori mostrata in /pagine/grafici (richiesto da Daniele il
+    18/09/2026), calcolata a richiesta dal layer web per un mese o un anno
+    a scelta invece di essere precalcolata qui per ogni possibile periodo.
+    """
+    colonne = ["Codice Servizio", "Codice Distretto", "Classe d'uso", "Mese", "Volume (m3)"]
+    if df_prorata_b.empty:
+        return pd.DataFrame(columns=colonne)
+
+    valide = df_prorata_b[df_prorata_b["CATEGORIA_DISTRETTO"] == "valido"]
+    if mese_min is not None and mese_max is not None:
+        valide = valide[(valide["MESE"] >= mese_min) & (valide["MESE"] <= mese_max)]
+    if valide.empty:
+        return pd.DataFrame(columns=colonne)
+
+    agg = (
+        valide.groupby(["CODICE_SERVIZIO", "DISTRETTO", "PRODOTTO_CODICE", "MESE"], as_index=False)["VOLUME_MESE_M3"]
+        .sum()
+        .rename(columns={
+            "CODICE_SERVIZIO": "Codice Servizio", "DISTRETTO": "Codice Distretto",
+            "PRODOTTO_CODICE": "Classe d'uso", "MESE": "Mese", "VOLUME_MESE_M3": "Volume (m3)",
+        })
+    )
+    agg["Volume (m3)"] = agg["Volume (m3)"].round(2)
+    return agg[colonne]
+
+
 def _ripartisci_su_mesi(data_fine: pd.Timestamp, giorni: int) -> list[tuple[pd.Period, int]]:
     """Dato il giorno finale di una lettura e il numero di giorni coperti,
     restituisce la lista (mese, n_giorni_in_quel_mese) che ripartisce il
@@ -516,6 +1150,74 @@ def _ripartisci_su_mesi(data_fine: pd.Timestamp, giorni: int) -> list[tuple[pd.P
         cursore = fine_blocco + timedelta(days=1)
 
     return [(pd.Period(year=anno, month=mese_num, freq="M"), g) for (anno, mese_num), g in ripartizione.items()]
+
+
+def _distretto_per_statistiche(categoria_distretto: str, distretto) -> str:
+    """Etichetta un punto per le viste STATISTICHE (mai per Import_WMS, che
+    deve restare con i soli codici distretto veri riconosciuti da WMS
+    SmartH2O — vedi aggrega()): 'NODMA' per i punti non distrettualizzati
+    (case sparse: cascine isolate, frazioni alimentate da altri acquedotti,
+    ecc. — vedi classifica_distretto), 'ND' per quelli con un distretto
+    anomalo/mancante, altrimenti il codice distretto vero. Richiesto da
+    Daniele il 18/09/2026: prima questi punti sparivano silenziosamente
+    dalle statistiche per classe d'uso e dal grafico mensile, invece di
+    comparire come una loro categoria a se' — utili a fini statistici anche
+    se non fatturabili a nessun distretto specifico.
+    """
+    if categoria_distretto == "case_sparse":
+        return "NODMA"
+    if categoria_distretto == "anomalia":
+        return "ND"
+    return distretto
+
+
+def aggrega_classe_uso_statistiche(df_prorata: pd.DataFrame) -> pd.DataFrame:
+    """Come la seconda tabella restituita da aggrega() (volume per
+    distretto+mese+classe d'uso), ma SENZA scartare case sparse (NODMA) e
+    distretto anomalo/mancante (ND) — vedi _distretto_per_statistiche. Usata
+    solo per le statistiche per classe d'uso (calcola_statistiche_classe_uso),
+    mai per Import_WMS.
+    """
+    colonne = ["Mese", "Codice Distretto", "Classe d'uso", "Volume (m3)"]
+    if df_prorata.empty:
+        return pd.DataFrame(columns=colonne)
+
+    df = df_prorata.copy()
+    df["DISTRETTO"] = [
+        _distretto_per_statistiche(cat, dist)
+        for cat, dist in zip(df["CATEGORIA_DISTRETTO"], df["DISTRETTO"])
+    ]
+    risultato = (
+        df.groupby(["MESE", "DISTRETTO", "PRODOTTO_CODICE"], as_index=False)["VOLUME_MESE_M3"]
+        .sum()
+        .rename(columns={
+            "MESE": "Mese", "DISTRETTO": "Codice Distretto",
+            "PRODOTTO_CODICE": "Classe d'uso", "VOLUME_MESE_M3": "Volume (m3)",
+        })
+    )
+    risultato["Volume (m3)"] = risultato["Volume (m3)"].round(2)
+    return risultato[colonne].sort_values(["Mese", "Codice Distretto", "Classe d'uso"])
+
+
+def conteggio_utenze_per_distretto_classe_statistiche(df_tutti: pd.DataFrame) -> pd.DataFrame:
+    """Come conteggio_utenze_per_distretto_classe, ma SENZA scartare case
+    sparse (NODMA) e distretto anomalo/mancante (ND) — denominatore
+    coerente con aggrega_classe_uso_statistiche per "Utenze Attive Oggi" e
+    "Consumo Medio" nelle statistiche per classe d'uso.
+    """
+    anagrafica = _ultima_anagrafica_utenze(df_tutti)
+    if anagrafica.empty:
+        return pd.DataFrame(columns=["Codice Distretto", "Classe d'uso", "Totale Utenze"])
+
+    anagrafica = anagrafica.copy()
+    anagrafica["DISTRETTO"] = [
+        _distretto_per_statistiche(cat, dist)
+        for cat, dist in zip(anagrafica["CATEGORIA_DISTRETTO"], anagrafica["DISTRETTO"])
+    ]
+    risultato = _pivot_stato(anagrafica, ["DISTRETTO", "PRODOTTO_CODICE"])
+    return risultato.rename(
+        columns={"DISTRETTO": "Codice Distretto", "PRODOTTO_CODICE": "Classe d'uso"}
+    ).sort_values(["Codice Distretto", "Classe d'uso"])
 
 
 def aggrega(df_prorata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -810,6 +1512,17 @@ def _giorni_nel_trimestre(trimestre: str) -> int:
     return (fine - inizio).days + 1
 
 
+def _mese_dopo_primo_trimestre(mese_min: pd.Period) -> pd.Period:
+    """Il primo mese DOPO il trimestre solare in cui cade mese_min — usato
+    per escludere il trimestre di apertura dell'archivio ("cold start", vedi
+    calcola_statistiche_trimestrali) anche dalle statistiche e dai grafici
+    mensili, non solo da quelli trimestrali (richiesto da Daniele il
+    18/09/2026: scartarlo per statistiche/grafici, ma tenerlo sempre in
+    archivio e nei volumi "ufficiali" come Import_WMS).
+    """
+    return (mese_min.asfreq("Q") + 1).asfreq("M", how="start")
+
+
 def calcola_statistiche_trimestrali(volumi_distretto_trimestre: pd.DataFrame) -> pd.DataFrame:
     """Per ogni (Trimestre, Distretto) del Riepilogo_Trimestrale: dotazione
     idrica media (m3/utenza/giorno, usando "Utenze Attive" gia' calcolato),
@@ -817,8 +1530,21 @@ def calcola_statistiche_trimestrali(volumi_distretto_trimestre: pd.DataFrame) ->
     variazione % rispetto allo stesso trimestre dell'anno precedente.
 
     Le variazioni restano vuote (None) quando manca il dato di confronto
-    (es. il primissimo trimestre in archivio, o un trimestre precedente non
-    ancora caricato) — non si inventa mai un confronto con un buco in mezzo.
+    (es. un trimestre precedente non ancora caricato) — non si inventa mai
+    un confronto con un buco in mezzo.
+
+    Il PRIMO trimestre di ogni distretto (quello in cui l'archivio "parte":
+    la maggior parte delle utenze ha li' la sua primissima lettura nota, che
+    per il Metodo B non genera consumo da sola — "effetto cold start")
+    viene escluso del tutto da questa tabella, su richiesta esplicita di
+    Daniele il 18/09/2026: la sua dotazione idrica sarebbe artificialmente
+    bassa, e la variazione % del trimestre SUCCESSIVO (che lo userebbe come
+    base di confronto) sarebbe artificialmente gonfiata — visto su
+    Belgioioso, dove il primo trimestre (2025-T3) fa risultare il
+    successivo a +162% di "crescita" che non e' mai successa davvero. I
+    volumi di quel trimestre restano intatti ovunque altrove
+    (Riepilogo_Trimestrale, Import_WMS...): solo questa tabella di trend lo
+    scarta.
     """
     colonne = [
         "Trimestre", "Codice Distretto", "Volume Fatturato (m3)", "Utenze Attive",
@@ -840,13 +1566,23 @@ def calcola_statistiche_trimestrali(volumi_distretto_trimestre: pd.DataFrame) ->
     )
 
     df = df.sort_values(["Codice Distretto", "_ord"]).reset_index(drop=True)
+    df["_e_primo_trimestre"] = df["_ord"] == df.groupby("Codice Distretto")["_ord"].transform("min")
+    primo_trimestre_per_distretto = {
+        riga["Codice Distretto"]: (riga["_anno"], riga["_num_trim"])
+        for _, riga in df[df["_e_primo_trimestre"]].iterrows()
+    }
+
     prec = df.groupby("Codice Distretto").shift(1)
+    prec_e_cold_start = df.groupby("Codice Distretto")["_e_primo_trimestre"].shift(1)
 
     var_prec = []
-    for v_att, v_prec, ord_att, ord_prec in zip(
-        df["Volume Fatturato (m3)"], prec["Volume Fatturato (m3)"], df["_ord"], prec["_ord"]
+    for v_att, v_prec, ord_att, ord_prec, precedente_e_cold_start in zip(
+        df["Volume Fatturato (m3)"], prec["Volume Fatturato (m3)"], df["_ord"], prec["_ord"], prec_e_cold_start
     ):
-        if pd.isna(v_prec) or pd.isna(ord_prec) or ord_prec != ord_att - 1 or v_prec == 0:
+        if (
+            pd.isna(v_prec) or pd.isna(ord_prec) or ord_prec != ord_att - 1 or v_prec == 0
+            or precedente_e_cold_start
+        ):
             var_prec.append(None)
         else:
             var_prec.append(round((v_att - v_prec) / v_prec * 100, 1))
@@ -858,7 +1594,8 @@ def calcola_statistiche_trimestrali(volumi_distretto_trimestre: pd.DataFrame) ->
         df["Codice Distretto"], df["_anno"], df["_num_trim"], df["Volume Fatturato (m3)"]
     ):
         chiave = (distretto, anno - 1, num_trim)
-        if chiave in riferimento.index:
+        e_cold_start_riferimento = primo_trimestre_per_distretto.get(distretto) == (anno - 1, num_trim)
+        if chiave in riferimento.index and not e_cold_start_riferimento:
             v_prec = riferimento.loc[chiave]
             if isinstance(v_prec, pd.Series):
                 v_prec = v_prec.iloc[0]
@@ -866,6 +1603,8 @@ def calcola_statistiche_trimestrali(volumi_distretto_trimestre: pd.DataFrame) ->
         else:
             var_anno.append(None)
     df["Variazione % vs Stesso Trimestre Anno Precedente"] = var_anno
+
+    df = df[~df["_e_primo_trimestre"]]
 
     return df[colonne].sort_values(["Trimestre", "Codice Distretto"])
 
@@ -895,8 +1634,14 @@ def calcola_statistiche_classe_uso(
     if volumi_distretto_mese_classe.empty:
         return pd.DataFrame(columns=colonne)
 
+    finestra = volumi_distretto_mese_classe
+    if mese_min is not None and mese_max is not None:
+        finestra = finestra[(finestra["Mese"] >= mese_min) & (finestra["Mese"] <= mese_max)]
+    if finestra.empty:
+        return pd.DataFrame(columns=colonne)
+
     tot = (
-        volumi_distretto_mese_classe.groupby(["Codice Distretto", "Classe d'uso"], as_index=False)["Volume (m3)"]
+        finestra.groupby(["Codice Distretto", "Classe d'uso"], as_index=False)["Volume (m3)"]
         .sum()
         .rename(columns={"Volume (m3)": "Volume Periodo Affidabile (m3)"})
     )
@@ -1051,13 +1796,24 @@ def trova_utenze_scomparse(file_in_ordine: list[pd.DataFrame]) -> pd.DataFrame:
 
 def trova_cessate_con_stima_finale(df_tutti: pd.DataFrame) -> pd.DataFrame:
     """Individua le utenze con contratto CHIUSO (STATO_SERVIZIO tra quelli
-    di STATI_CHIUSURA_ATTESI) la cui ULTIMA lettura nota NON è una lettura
-    reale (vedi TIPI_LETTURA_REALE piu' sopra, sezione Metodo B).
+    di STATI_CHIUSURA_ATTESI) la cui ULTIMA lettura nota (di consumo) NON è
+    una lettura reale (vedi TIPI_LETTURA_REALE piu' sopra, sezione Metodo B).
 
     PERCHE' E' UN'ANOMALIA (confermato da Daniele): quando un'utenza cessa
     e' obbligatorio effettuare una lettura reale di chiusura. Se l'ultima
     lettura nota e' invece una stima, il contratto potrebbe essere stato
     chiuso senza la lettura di chiusura dovuta — da verificare a mano.
+
+    Le righe INIZIALE ESCLUSO/INCLUSO (TIPI_INIZIO_CONTATORE) sono escluse
+    PRIMA di cercare "l'ultima": sono marcatori di apertura di un nuovo
+    contatore (valore sempre 0, non una lettura di consumo), e Neta H2O ne
+    logga una anche quando un contratto si chiude lo stesso giorno di un
+    cambio contatore — subito dopo la reale di chiusura (RIMOZIONE PER
+    CAMBIO) che la precede nello stesso giorno (vedi _PRIORITA_STESSA_DATA).
+    Senza questo filtro, quella riga fittizia risultava "l'ultima lettura"
+    e faceva scattare l'anomalia anche quando la reale di chiusura c'era
+    eccome (richiesto da Daniele il 18/09/2026, caso di verifica: utenza
+    53787283).
     """
     colonne_output = [
         "Codice Servizio", "Indirizzo", "Distretto", "Stato Servizio",
@@ -1066,8 +1822,12 @@ def trova_cessate_con_stima_finale(df_tutti: pd.DataFrame) -> pd.DataFrame:
     if df_tutti.empty:
         return pd.DataFrame(columns=colonne_output)
 
+    df_no_apertura = df_tutti[~df_tutti["TIPO_LETTURA"].isin(TIPI_INIZIO_CONTATORE)]
+    if df_no_apertura.empty:
+        return pd.DataFrame(columns=colonne_output)
+
     ultima = (
-        _ordina_priorita_stessa_data(df_tutti)
+        _ordina_priorita_stessa_data(df_no_apertura)
         .groupby("CODICE_SERVIZIO", as_index=False)
         .last()
     )
@@ -1084,6 +1844,82 @@ def trova_cessate_con_stima_finale(df_tutti: pd.DataFrame) -> pd.DataFrame:
     if anomale.empty:
         return pd.DataFrame(columns=colonne_output)
     return anomale[colonne_output].sort_values("Ultima Data Lettura", ascending=False)
+
+
+# Stato di chiusura fatturazione per mese (richiesto da Daniele il
+# 19/09/2026): l'ufficio fatturazione, a ogni giro, emette una STIMATA per
+# (quasi) tutte le utenze con DATA_LETTURA = ultimo giorno del mese
+# fatturato (es. fatturato ad aprile -> stima al 30/04; a maggio -> 30/05).
+# Un picco di STIMATE su un fine mese e' quindi il segnale che quel lotto e'
+# stato girato. Nei dati reali: Belgioioso 31/08 (2163), 30/11 (2286),
+# 28/02 (1426); Mortara 30/09, 31/12, 31/03, 30/06 (1400-4000 l'una), contro
+# poche unita' (4-34) sugli altri fine mese. Regola scelta da Daniele
+# ("picco relativo"): soglia in percentuale sul picco del comune stesso, non
+# un numero assoluto, cosi' vale per comuni grandi e piccoli.
+SOGLIA_LOTTO_PCT_PICCO = 30.0
+# Con meno di due lotti nello storico il "picco tipico" coincide con l'unico
+# lotto visto e non e' affidabile: lo stato e' "non determinabile".
+MIN_LOTTI_PER_DETERMINARE = 2
+
+
+def calcola_stato_chiusura_mesi(
+    df_tutti: pd.DataFrame, soglia_pct_picco: float = SOGLIA_LOTTO_PCT_PICCO
+) -> pd.DataFrame:
+    """Per ogni mese tra la prima e l'ultima DATA_LETTURA dell'archivio (di
+    UN comune: il picco e' relativo al comune) dice se il lotto di
+    fatturazione di quel mese risulta girato.
+
+    Stato: "Chiuso" (STIMATE a fine mese >= soglia_pct_picco % del picco),
+    "Senza lotto" (sotto soglia: mese non fatturato in un giro, o giro non ancora girato), "Non determinabile" (meno di
+    MIN_LOTTI_PER_DETERMINARE lotti nello storico). Colonne aggiuntive:
+    quante STIMATE a fine mese, e "Letture Reali Tardive" = letture reali
+    con DATA_LETTURA nel mese arrivate in un file successivo a quello che
+    contiene il lotto di stime (conguaglio di stime gia' emesse). E' solo
+    informativo: non cambia il calcolo Metodo B.
+    """
+    colonne = ["Mese", "Stime a Fine Mese", "Picco Comune", "% del Picco", "Stato",
+               "File del Lotto", "Letture Reali Tardive"]
+    if df_tutti.empty:
+        return pd.DataFrame(columns=colonne)
+
+    df = df_tutti[["DATA_LETTURA", "TIPO_LETTURA", "FILE_ORIGINE"]].dropna(subset=["DATA_LETTURA"]).copy()
+    if df.empty:
+        return pd.DataFrame(columns=colonne)
+    df["_mese"] = df["DATA_LETTURA"].dt.to_period("M")
+    fine_mese = df["DATA_LETTURA"].dt.normalize() == df["_mese"].dt.end_time.dt.normalize()
+    stime = df[fine_mese & (df["TIPO_LETTURA"] == "LETTURA STIMATA")]
+    conteggio = stime.groupby("_mese").size()
+
+    mesi = pd.period_range(df["_mese"].min(), df["_mese"].max(), freq="M")
+    conteggio = conteggio.reindex(mesi, fill_value=0)
+    picco = int(conteggio.max())
+    e_lotto = (conteggio >= picco * soglia_pct_picco / 100) & (conteggio > 0)
+    determinabile = int(e_lotto.sum()) >= MIN_LOTTI_PER_DETERMINARE
+
+    # Ordine cronologico dei file, come in trova_utenze_scomparse: per
+    # data di lettura piu' vecchia.
+    ordine_file = df.groupby("FILE_ORIGINE")["DATA_LETTURA"].min().rank(method="first")
+    reali = df[df["TIPO_LETTURA"].isin(TIPI_LETTURA_REALE)]
+
+    righe = []
+    for mese in mesi:
+        n = int(conteggio[mese])
+        if not determinabile:
+            stato = "Non determinabile"
+        else:
+            stato = "Chiuso" if e_lotto[mese] else "Senza lotto"
+        file_lotto = ""
+        tardive = 0
+        if stato == "Chiuso":
+            file_lotto = min(stime.loc[stime["_mese"] == mese, "FILE_ORIGINE"], key=lambda f: ordine_file[f])
+            reali_mese = reali[reali["_mese"] == mese]
+            tardive = int((reali_mese["FILE_ORIGINE"].map(ordine_file) > ordine_file[file_lotto]).sum())
+        righe.append({
+            "Mese": mese, "Stime a Fine Mese": n, "Picco Comune": picco,
+            "% del Picco": round(n / picco * 100, 1) if picco else 0.0,
+            "Stato": stato, "File del Lotto": file_lotto, "Letture Reali Tardive": tardive,
+        })
+    return pd.DataFrame(righe, columns=colonne)
 
 
 CHIAVE_ARCHIVIO = ["CODICE_SERVIZIO", "DATA_LETTURA", "TIPO_LETTURA"]
@@ -1234,8 +2070,32 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
     # delle letture (dalla piu' vecchia alla piu' recente DATA_LETTURA).
     mese_letture = df_tutti["DATA_LETTURA"].dt.to_period("M")
     mese_min, mese_max = mese_letture.min(), mese_letture.max()
+    # Finestra per statistiche/grafici: parte DOPO il trimestre di "cold
+    # start" (vedi _mese_dopo_primo_trimestre) — i volumi "ufficiali"
+    # (Import_WMS, Riepilogo_Trimestrale) restano su mese_min/mese_max
+    # senza questo taglio, cambia solo cio' che finisce nelle statistiche
+    # e nei grafici.
+    mese_min_statistiche = _mese_dopo_primo_trimestre(mese_min)
 
     segnalazioni = costruisci_segnalazioni(df_tutti)
+
+    # Contatori FIGLIO (LEGAMI_FORNITURA — vedi LEGAME_FIGLIO piu' sopra):
+    # esclusi dal Metodo B, MAI dall'archivio. Il padre misura gia' il
+    # consumo totale del condominio (confermato da Daniele il 18/09/2026):
+    # calcolare anche la differenza dei figli conterebbe il loro consumo
+    # due volte nel totale del distretto.
+    figli = df_tutti[df_tutti["LEGAMI_FORNITURA"] == LEGAME_FIGLIO]
+    if not figli.empty:
+        n_figli = figli["CODICE_SERVIZIO"].nunique()
+        n_padri = df_tutti.loc[df_tutti["LEGAMI_FORNITURA"] == "PADRE", "CODICE_SERVIZIO"].nunique()
+        warning.append(
+            f"{n_figli} utenze sono contatori FIGLIO (sotto-contatori di {n_padri} "
+            "contatori PADRE): il loro consumo è già incluso nella lettura del padre, "
+            "quindi sono escluse dal calcolo dei volumi per distretto (Metodo B) per non "
+            "contarlo due volte. Restano visibili nell'archivio letture, solo escluse dal "
+            "calcolo — vedi LEGAMI_FORNITURA nel file Neta H2O."
+        )
+    df_tutti_billing = df_tutti[df_tutti["LEGAMI_FORNITURA"] != LEGAME_FIGLIO]
 
     # --- METODO B (differenza di letture, le reali vincono sulle
     # stimate) --- UNICO metodo usato dal 16/09/2026: confermato da
@@ -1243,7 +2103,7 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
     # letture reali conguagliano le stime, non si sommano ad esse — vedi
     # 2.4/2.10). E' questo il volume che alimenta district_billed (foglio
     # Import_WMS).
-    periodi_b, anomalie_metodo_b, riferimento_prodie = calcola_periodi_metodo_b(df_tutti)
+    periodi_b, anomalie_metodo_b, riferimento_prodie = calcola_periodi_metodo_b(df_tutti_billing)
     if not anomalie_metodo_b.empty:
         warning.append(
             f"Metodo B: {len(anomalie_metodo_b)} letture escluse dal calcolo perché "
@@ -1252,10 +2112,25 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
             "— probabile problema di qualità dati da chiedere a Neta H2O."
         )
     df_prorata_b = prorata_mensile_metodo_b(periodi_b)
+    # Taglio di coda per statistiche/grafici (mai Import_WMS), simmetrico a
+    # mese_min_statistiche ma per il motivo opposto: non "manca storia
+    # prima" ma "manca la chiusura dopo" — vedi mese_max_statistiche.
+    ultimo_mese_affidabile = mese_max_statistiche(df_prorata_b)
+    mese_max_statistiche_valore = (
+        min(mese_max, ultimo_mese_affidabile) if ultimo_mese_affidabile is not None else mese_max
+    )
+    if ultimo_mese_affidabile is not None and ultimo_mese_affidabile < mese_max:
+        warning.append(
+            f"Statistiche e grafici si fermano a {ultimo_mese_affidabile}: i mesi successivi (fino a "
+            f"{mese_max}) non hanno ancora una quota di volume reale sufficiente — il lotto di letture "
+            "trimestrale per quel periodo non è ancora arrivato. Import_WMS li include comunque, "
+            "verranno confermati/corretti al prossimo caricamento."
+        )
     volumi_distretto_mese_b_completo, volumi_distretto_mese_b_classe = aggrega(df_prorata_b)
     volumi_distretto_mese_b, volumi_fuori_periodo_b = dividi_per_finestra(
         volumi_distretto_mese_b_completo, mese_min, mese_max
     )
+
     volumi_distretto_trimestre_b = calcola_riepilogo_trimestrale(volumi_distretto_mese_b)
 
     volumi_comune_mese_b = aggrega_comune(df_prorata_b)
@@ -1319,10 +2194,38 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
     # 16/09/2026): dotazione idrica, variazioni % nel tempo, ripartizione
     # per classe d'uso, coefficiente di punta stagionale — vedi 2.14.
     statistiche_trimestrali = calcola_statistiche_trimestrali(volumi_distretto_trimestre_b)
+    # NODMA (case sparse) e ND (distretto anomalo/mancante) inclusi qui —
+    # mai in volumi_distretto_mese_b_classe/utenze_per_distretto_classe,
+    # che restano con i soli distretti veri per Import_WMS/Excel
+    # "Dettaglio_Classi". Vedi _distretto_per_statistiche.
     statistiche_classe_uso = calcola_statistiche_classe_uso(
-        volumi_distretto_mese_b_classe, utenze_per_distretto_classe, mese_min, mese_max
+        aggrega_classe_uso_statistiche(df_prorata_b),
+        conteggio_utenze_per_distretto_classe_statistiche(df_tutti),
+        mese_min_statistiche, mese_max_statistiche_valore,
     )
-    coefficiente_punta = calcola_coefficiente_punta(volumi_distretto_mese_b)
+    coefficiente_punta = calcola_coefficiente_punta(
+        volumi_distretto_mese_b[
+            (volumi_distretto_mese_b["Mese"] >= mese_min_statistiche)
+            & (volumi_distretto_mese_b["Mese"] <= mese_max_statistiche_valore)
+        ]
+    )
+    volumi_distretto_mese_origine = aggrega_origine_mensile(
+        df_prorata_b, mese_min_statistiche, mese_max_statistiche_valore
+    )
+    volumi_utenza_mese = aggrega_utenza_mese(df_prorata_b, mese_min_statistiche, mese_max_statistiche_valore)
+
+    # Utenze passate da NODMA/ND a un distretto vero nella storia
+    # dell'archivio: vedi trova_utenze_corrette_da_nodma per il perche' e'
+    # solo una segnalazione, non una correzione automatica del calcolo.
+    utenze_corrette_da_nodma = trova_utenze_corrette_da_nodma(df_prorata_b)
+    if not utenze_corrette_da_nodma.empty:
+        tot_escluso = utenze_corrette_da_nodma["Volume Escluso Permanentemente (m3)"].sum()
+        warning.append(
+            f"{len(utenze_corrette_da_nodma)} utenze sono passate da non distrettualizzate/anomale "
+            f"(NODMA/ND) a un distretto vero nella storia dell'archivio: {tot_escluso:,.0f} m3 restano "
+            "esclusi per sempre da qualunque distretto (i periodi chiusi PRIMA della correzione). "
+            "Dettaglio nel foglio 'Utenze_Corrette_Da_NODMA'."
+        )
 
     n_trimestri_parziali = (volumi_distretto_trimestre_b["Completo"] == "No (parziale)").sum()
     if n_trimestri_parziali:
@@ -1362,6 +2265,10 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
         riferimento_prodie=riferimento_prodie,
         cessate_con_stima_finale=cessate_con_stima_finale,
         riepilogo_file=pd.DataFrame(riepilogo_righe),
+        volumi_distretto_mese_origine=volumi_distretto_mese_origine,
+        volumi_utenza_mese=volumi_utenza_mese,
+        utenze_corrette_da_nodma=utenze_corrette_da_nodma,
+        stato_chiusura_mesi=calcola_stato_chiusura_mesi(df_tutti),
         warning=warning,
     )
 
@@ -1429,6 +2336,11 @@ def esporta_excel(risultato: RisultatoElaborazione, output_path: str | Path) -> 
         df_rif.to_excel(writer, sheet_name="Rif_ConsumoProDie", index=False)
 
         risultato.cessate_con_stima_finale.to_excel(writer, sheet_name="Cessate_Con_Stima_Finale", index=False)
+
+        df_nodma = risultato.utenze_corrette_da_nodma.copy()
+        if "Mesi Interessati" in df_nodma.columns:
+            df_nodma["Mesi Interessati"] = df_nodma["Mesi Interessati"].astype(str)
+        df_nodma.to_excel(writer, sheet_name="Utenze_Corrette_Da_NODMA", index=False)
 
     return output_path
 

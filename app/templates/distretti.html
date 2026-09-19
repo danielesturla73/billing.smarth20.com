@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block titolo %}Distretti — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Elenco distretti → comune</h1>
+<p class="nota-metodologica">
+  Usato per distinguere, quando un distretto trovato in un'estrazione non appartiene al comune del file,
+  un errore vero da un caso legittimo (un distretto di un comune limitrofo che serve anche punti di questo
+  comune — vedi la pagina Info). Le modifiche qui hanno effetto dal prossimo ricalcolo, senza bisogno di
+  riavviare il servizio.
+</p>
+
+{% if errore_import %}
+<div class="avviso">Import non riuscito: {{ errore_import }}</div>
+{% endif %}
+{% if esito_import %}
+<div class="panel" style="border:1px solid var(--green);background:var(--green-bg)">
+  Importate/aggiornate <strong>{{ esito_import.righe_importate }}</strong> righe dal file —
+  l'elenco ha ora <strong>{{ esito_import.righe_totali }}</strong> voci in totale.
+</div>
+{% endif %}
+{% if errore_import_confini %}
+<div class="avviso">Import confini non riuscito: {{ errore_import_confini }}</div>
+{% endif %}
+{% if esito_import_confini %}
+<div class="panel" style="border:1px solid var(--green);background:var(--green-bg)">
+  Importati <strong>{{ esito_import_confini.n_feature }}</strong> confini (proprietà usata per il codice:
+  <code>{{ esito_import_confini.proprieta_usata }}</code>) — visibili nella <a href="/pagine/mappa">pagina Mappa</a>.
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Importa da file</h2>
+  <p class="nota-metodologica" style="margin-top:0">
+    Un CSV o Excel che hai già (es. esportato da WMS SmartH2O). Riconosce colonne con nomi simili
+    ("Comune", "Distretto", "Comuni Associabili"...) — se non le riconosce te lo dice, mostrando quali
+    colonne ha letto dal file. Le righe si aggiungono o aggiornano per codice distretto: non sovrascrive
+    l'intero elenco esistente.
+  </p>
+  <form method="post" action="/distretti/importa" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:center">
+    <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
+    <button type="submit" class="btn-mini" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Importa</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Importa confini (GeoJSON) — per la pagina Mappa</h2>
+  <p class="nota-metodologica" style="margin-top:0">
+    Un GeoJSON con una Feature per distretto (poligono o multipoligono). Riconosce da solo quale proprietà
+    contiene il codice distretto ("codice", "distretto", "codice_distretto"...) — se non la riconosce te lo
+    dice, mostrando quali proprietà ha letto nella prima feature. A differenza del CSV sopra, un nuovo file
+    <strong>sostituisce interamente</strong> quello precedente (i confini non si fondono riga per riga).
+  </p>
+  <form method="post" action="/distretti/importa-confini" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:center">
+    <input type="file" name="file" accept=".geojson,.json" required>
+    <button type="submit" class="btn-mini" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Importa confini</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>{% if riga_modifica %}Modifica {{ riga_modifica.codice_distretto }}{% else %}Aggiungi una riga{% endif %}</h2>
+  <form method="post" action="/distretti/salva" style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+    {% if comune_selezionato %}<input type="hidden" name="comune" value="{{ comune_selezionato }}">{% endif %}
+    <div>
+      <label style="display:block;font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:var(--text-2);margin-bottom:4px">Codice Distretto</label>
+      <input type="text" name="codice_distretto" required value="{{ riga_modifica.codice_distretto if riga_modifica else '' }}"
+             style="border:1px solid var(--border-strong);border-radius:6px;padding:6px 10px;font-family:var(--mono)">
+    </div>
+    <div>
+      <label style="display:block;font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:var(--text-2);margin-bottom:4px">Nome Distretto</label>
+      <input type="text" name="nome_distretto" value="{{ riga_modifica.nome_distretto if riga_modifica else '' }}"
+             style="border:1px solid var(--border-strong);border-radius:6px;padding:6px 10px">
+    </div>
+    <div>
+      <label style="display:block;font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:var(--text-2);margin-bottom:4px">Comune Ufficiale</label>
+      <input type="text" name="comune_ufficiale" required list="lista-comuni" value="{{ riga_modifica.comune_ufficiale if riga_modifica else '' }}"
+             style="border:1px solid var(--border-strong);border-radius:6px;padding:6px 10px">
+    </div>
+    <div>
+      <label style="display:block;font-size:11px;letter-spacing:.3px;text-transform:uppercase;color:var(--text-2);margin-bottom:4px">Comuni Associabili (separati da ;)</label>
+      <input type="text" name="comuni_associabili" list="lista-comuni" value="{{ riga_modifica.comuni_associabili if riga_modifica else '' }}"
+             style="border:1px solid var(--border-strong);border-radius:6px;padding:6px 10px;min-width:220px">
+    </div>
+    <datalist id="lista-comuni">
+      {% for c in comuni_disponibili %}<option value="{{ c }}">{% endfor %}
+    </datalist>
+    <button type="submit" class="btn-mini" style="background:var(--teal);color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">Salva</button>
+    {% if riga_modifica %}<a href="/pagine/distretti" style="font-size:13px">Annulla modifica</a>{% endif %}
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Elenco{% if comune_selezionato %} — {{ comune_selezionato }}{% endif %} ({{ righe|length }})</h2>
+  {% if comune_selezionato %}
+  <p class="nota-metodologica" style="margin-top:0">
+    Filtrato sul comune scelto in alto: distretti ufficiali di {{ comune_selezionato }} più quelli di altri
+    comuni a cui {{ comune_selezionato }} risulta associabile. <a href="/pagine/distretti">Mostra tutti</a>.
+  </p>
+  {% endif %}
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Codice Distretto</th><th>Nome Distretto</th><th>Comune Ufficiale</th><th>Comuni Associabili</th><th></th></tr></thead>
+      <tbody>
+        {% for r in righe %}
+        <tr>
+          <td>{{ r.codice_distretto }}</td>
+          <td>{{ r.nome_distretto }}</td>
+          <td>{% if r.comune_ufficiale %}{{ r.comune_ufficiale }}{% else %}<span style="color:var(--amber)">da completare</span>{% endif %}</td>
+          <td>{{ r.comuni_associabili }}</td>
+          <td style="white-space:nowrap">
+            <a href="/pagine/distretti?modifica={{ r.codice_distretto }}{{ '&comune=' + comune_selezionato if comune_selezionato else '' }}">Modifica</a>
+            &nbsp;·&nbsp;
+            <form method="post" action="/distretti/elimina" style="display:inline"
+                  onsubmit="return confirm('Eliminare {{ r.codice_distretto }} dall\'elenco?')">
+              <input type="hidden" name="codice_distretto" value="{{ r.codice_distretto }}">
+              {% if comune_selezionato %}<input type="hidden" name="comune" value="{{ comune_selezionato }}">{% endif %}
+              <button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0;font:inherit;text-decoration:underline">Elimina</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

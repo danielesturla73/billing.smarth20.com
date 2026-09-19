@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block titolo %}Utenza {{ codice_servizio }} — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<p class="nota-metodologica">
+  <a href="/pagine/diagnostica?comune={{ comune }}">&larr; Torna alla diagnostica di {{ comune }}</a>
+</p>
+<h1>Utenza {{ codice_servizio }}</h1>
+<p class="nota-metodologica">{{ indirizzo }}{% if cap %}, {{ cap }}{% endif %} — {{ comune }}</p>
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="etichetta">Distretto</div>
+    <div class="valore">{{ distretto }}</div>
+  </div>
+  <div class="kpi">
+    <div class="etichetta">Stato servizio</div>
+    <div class="valore">{{ stato_servizio }}</div>
+  </div>
+  <div class="kpi">
+    <div class="etichetta">Classe d'uso</div>
+    <div class="valore">{{ prodotto }}</div>
+  </div>
+</div>
+
+{% if anomalie_utenza %}
+<div class="panel">
+  <h2>Perché questa utenza è segnalata</h2>
+  {% for a in anomalie_utenza %}
+  <div class="avviso">{{ a }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Cronologia letture</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Data Lettura</th>
+          <th>Tipo Lettura</th>
+          <th class="num">Lettura</th>
+          <th class="num">Consumo dichiarato</th>
+          <th class="num">GG Lett. Prec.</th>
+          <th>Stato Lettura</th>
+          <th>Distretto</th>
+          <th>File Origine</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in letture %}
+        <tr>
+          <td>{{ r["DATA_LETTURA"] }}</td>
+          <td>
+            {{ r["TIPO_LETTURA"] }}
+            <span class="badge {{ 'real' if r['_reale'] else 'stimato' }}">{{ "reale" if r["_reale"] else "stima" }}</span>
+          </td>
+          <td class="num">{{ r["LETTURA"] }}</td>
+          <td class="num">{{ r["CONSUMO"] }}</td>
+          <td class="num">{{ r["GG_LETT_PREC"] }}</td>
+          <td>{{ r["STATO_LETTURA"] }}</td>
+          <td>{{ r["DISTRETTO"] }}</td>
+          <td>{{ r["FILE_ORIGINE"] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

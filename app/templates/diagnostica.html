@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block titolo %}Diagnostica — Fatturazione Utenze{% endblock %}
+{% block titolo %}Diagnostica — Analisi Consumi da Fatturazione{% endblock %}
 {% block contenuto %}
 {% if comune %}
   <h1>Diagnostica — {{ comune }}</h1>
@@ -26,17 +26,47 @@
       <div class="etichetta">Cessate con stima finale</div>
       <div class="valore">{{ cessate_con_stima_finale|length }}</div>
     </div>
+    <div class="kpi {% if utenze_corrette_da_nodma|length > 0 %}warn{% endif %}">
+      <div class="etichetta">Corrette da NODMA/ND</div>
+      <div class="valore">{{ utenze_corrette_da_nodma|length }}</div>
+    </div>
   </div>
 
-  <div class="panel">
-    <h2>Utenze scomparse — ancora attive nell'ultima lettura nota (da verificare)</h2>
+  <details class="panel">
+    <summary>Lotti di stime a fine mese — affidabilità per mese ({{ stato_chiusura_mesi|length }} mesi)</summary>
+    <p class="nota-metodologica">
+      Un mese è "Chiuso" se le STIMATE datate all'ultimo giorno del mese sono almeno il 30% del picco del comune
+      (segnale che il giro di fatturazione di quel mese è stato fatto: le stime sono state emesse). "Letture Reali Tardive" = letture reali del mese
+      arrivate in un file successivo a quello del lotto. Solo informativo: non cambia il calcolo.
+    </p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Mese</th><th>Stime a Fine Mese</th><th>% del Picco</th><th>Stato</th><th>File del Lotto</th><th>Letture Reali Tardive</th></tr></thead>
+        <tbody>
+          {% for r in stato_chiusura_mesi %}
+          <tr>
+            <td>{{ r["Mese"] }}</td>
+            <td class="num">{{ r["Stime a Fine Mese"] }}</td>
+            <td class="num">{{ r["% del Picco"] }}</td>
+            <td>{{ r["Stato"] }}</td>
+            <td>{{ r["File del Lotto"] }}</td>
+            <td class="num">{{ r["Letture Reali Tardive"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <details class="panel">
+    <summary>Utenze scomparse — ancora attive nell'ultima lettura nota, da verificare ({{ utenze_scomparse_da_verificare|length }})</summary>
     <div class="table-scroll">
       <table>
         <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Ultimo Stato</th><th>Ultima Data Lettura</th><th>Ultimo File</th></tr></thead>
         <tbody>
           {% for r in utenze_scomparse_da_verificare %}
           <tr>
-            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['Codice Servizio'] }}">{{ r["Codice Servizio"] }}</a></td>
             <td>{{ r["Indirizzo"] }}</td>
             <td>{{ r["Ultimo Stato Servizio"] }}</td>
             <td>{{ r["Ultima Data Lettura"] }}</td>
@@ -46,17 +76,17 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
 
-  <div class="panel">
-    <h2>Segnalazioni — distretto anomalo o mancante</h2>
+  <details class="panel">
+    <summary>Segnalazioni — distretto anomalo o mancante ({{ segnalazioni|length }})</summary>
     <div class="table-scroll">
       <table>
         <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto Riportato</th><th>Motivo</th><th>Stato Servizio</th></tr></thead>
         <tbody>
           {% for r in segnalazioni %}
           <tr>
-            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['Codice Servizio'] }}">{{ r["Codice Servizio"] }}</a></td>
             <td>{{ r["Indirizzo"] }}</td>
             <td>{{ r["Distretto Riportato"] }}</td>
             <td>{{ r["Motivo"] }}</td>
@@ -66,17 +96,17 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
 
-  <div class="panel">
-    <h2>Anomalie Metodo B — letture escluse dal calcolo</h2>
+  <details class="panel">
+    <summary>Anomalie Metodo B — letture escluse dal calcolo ({{ anomalie_metodo_b|length }})</summary>
     <div class="table-scroll">
       <table>
         <thead><tr><th>Codice Servizio</th><th>Data Lettura</th><th>Tipo Lettura</th><th>Motivo</th></tr></thead>
         <tbody>
           {% for r in anomalie_metodo_b %}
           <tr>
-            <td class="num">{{ r["CODICE_SERVIZIO"] }}</td>
+            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['CODICE_SERVIZIO'] }}">{{ r["CODICE_SERVIZIO"] }}</a></td>
             <td>{{ r["DATA_LETTURA"] }}</td>
             <td>{{ r["TIPO_LETTURA"] }}</td>
             <td>{{ r["MOTIVO"] }}</td>
@@ -85,17 +115,17 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
 
-  <div class="panel">
-    <h2>Cessate con stima finale — mancava la lettura reale di chiusura</h2>
+  <details class="panel">
+    <summary>Cessate con stima finale — mancava la lettura reale di chiusura ({{ cessate_con_stima_finale|length }})</summary>
     <div class="table-scroll">
       <table>
         <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto</th><th>Ultima Lettura (tipo)</th><th>Ultima Data Lettura</th></tr></thead>
         <tbody>
           {% for r in cessate_con_stima_finale %}
           <tr>
-            <td class="num">{{ r["Codice Servizio"] }}</td>
+            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['Codice Servizio'] }}">{{ r["Codice Servizio"] }}</a></td>
             <td>{{ r["Indirizzo"] }}</td>
             <td>{{ r["Distretto"] }}</td>
             <td>{{ r["Ultima Lettura (tipo)"] }}</td>
@@ -105,7 +135,33 @@
         </tbody>
       </table>
     </div>
-  </div>
+  </details>
+
+  <details class="panel">
+    <summary>Corrette da NODMA/ND — passate a un distretto vero, volume storico rimasto escluso ({{ utenze_corrette_da_nodma|length }})</summary>
+    <p class="nota-metodologica">
+      Utenze la cui classificazione è cambiata da non distrettualizzata/anomala (NODMA/ND) a un distretto
+      vero nella storia dell'archivio. Il periodo che si chiude con la prima lettura reale del distretto
+      corretto viene già attribuito in automatico — il volume qui sotto è quello dei periodi chiusi
+      <strong>prima</strong> della correzione, che restano esclusi da qualunque distretto per sempre (anche
+      ricaricando uno storico corretto: la deduplica dell'archivio tiene sempre la riga già presente).
+    </p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Codice Servizio</th><th>Distretto Attuale</th><th class="num">Volume Escluso (m³)</th><th>Mesi Interessati</th></tr></thead>
+        <tbody>
+          {% for r in utenze_corrette_da_nodma %}
+          <tr>
+            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['Codice Servizio'] }}">{{ r["Codice Servizio"] }}</a></td>
+            <td>{{ r["Distretto Attuale"] }}</td>
+            <td class="num">{{ "{:,.2f}".format(r["Volume Escluso Permanentemente (m3)"]) }}</td>
+            <td>{{ r["Mesi Interessati"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
 {% else %}
   <h1>Diagnostica</h1>
   <p class="nota-metodologica">Scegli un comune dal filtro in alto per vedere le anomalie da verificare.</p>

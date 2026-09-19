@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block titolo %}Info — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Come funziona</h1>
+<p class="nota-metodologica">
+  Questa pagina spiega in linguaggio semplice come l'app calcola i volumi e come leggere i grafici —
+  per il dettaglio tecnico completo vedi <code>project_docs/</code> nel repository.
+</p>
+
+<div class="panel">
+  <h2>Cos'è questa applicazione</h2>
+  <p>
+    Legge le estrazioni trimestrali del CRM Neta H2O (un file Excel per comune) e calcola i m³
+    consumati (fatturati) per ogni <strong>distretto idrico</strong> in ogni mese. Il risultato (<code>Import_WMS</code>)
+    alimenta <strong>WMS SmartH2O</strong>, un'applicazione separata che lo confronta con i volumi immessi per
+    il bilancio idrico top-down e la riduzione delle perdite (trend mensile, consolidato una volta l'anno; anche
+    i mesi con stime provvisorie servono al trend). Oggi il trasferimento è ancora manuale, non automatico.
+  </p>
+</div>
+
+<div class="panel">
+  <h2>Come si calcola il volume — Metodo B</h2>
+  <p>
+    Il principio di base: il volume consumato è la <strong>differenza fisica tra due letture REALI
+    consecutive</strong> del contatore — non la somma dei "consumi" dichiarati nel file Neta H2O.
+  </p>
+  <ul>
+    <li>Le letture <strong>stimate</strong> (STIMATA, RIPROPORZIONATA, SPEZZATURA) che cadono tra due letture
+      reali non contano da sole: la lettura reale successiva le "conguaglia" — la sostituisce con il dato
+      vero, non si somma a loro.</li>
+    <li>Se l'ultima lettura nota di un periodo è ancora una stima (nessuna reale l'ha ancora confermata), si
+      usa comunque il suo valore dichiarato, come volume <strong>provvisorio</strong> — verrà sostituito da
+      solo al prossimo ricalcolo, quando arriverà la lettura reale mancante.</li>
+    <li>Un <strong>cambio di contatore</strong> interrompe sempre il confronto: non si calcola mai una
+      differenza tra le letture di due contatori fisici diversi.</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Le protezioni contro i dati anomali</h2>
+  <ul>
+    <li><strong>Letture sentinella</strong> — valori come 999999 o 9999999 sono codici placeholder di Neta
+      H2O per "lettura non disponibile", non consumi veri: vengono scartati, sia quando cadono in mezzo a un
+      periodo sia quando sono la prima lettura nota di un contatore.</li>
+    <li><strong>Ritmo di consumo assurdo</strong> — se una differenza tra due letture implica più di 500
+      m³/giorno, è quasi certamente un errore di lettura: esclusa dal calcolo e segnalata.</li>
+    <li><strong>Reset di contatore non marcato</strong> — se la lettura scende tra due letture reali senza un
+      cambio contatore dichiarato nel file, il periodo non viene azzerato: si <strong>stima</strong> con il
+      ritmo medio storico della stessa utenza (m³/giorno calcolato sugli altri periodi validi), e resta
+      comunque segnalato per verifica.</li>
+    <li><strong>Contatori padre/figlio</strong> — un sotto-contatore (FIGLIO) non viene mai fatturato
+      separatamente: il contatore padre misura già il consumo totale del condominio, che include il suo.</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Cosa non fa, per scelta</h2>
+  <ul>
+    <li>Non esiste più un "Metodo A" (somma dei consumi dichiarati nel file): contava due volte le stime già
+      conguagliate da una lettura reale successiva — rimosso su richiesta esplicita di Daniele, non verrà
+      reintrodotto nemmeno come confronto/diagnostica.</li>
+    <li>Non invia mai automaticamente i dati a WMS SmartH2O: il caricamento in <code>district_billed</code>
+      resta un'azione manuale, con conferma umana, finché la logica di calcolo non sarà validata del tutto
+      da Neta H2O.</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Come leggere i grafici</h2>
+  <ul>
+    <li><strong>Volumi mensili per distretto</strong> — tre colori nella stessa barra: <span style="color:#1C7C4C">verde = reale</span>
+      (misura fisica consolidata), <span style="color:#B9700B">ambra = provvisorio</span> (in attesa di una
+      lettura reale che lo confermi, si aggiorna da solo), <span style="color:#B3261E">rosso = interpolato</span>
+      (reset di contatore non marcato, stimato dal ritmo storico — non si autocorregge da solo, resta così
+      finché non verifichi il dato con Neta H2O).</li>
+    <li><strong>Consumi per classe d'uso</strong> — quota di ciascuna categoria (residenziale, pubblico,
+      industriale, commerciale...) sul volume totale del distretto selezionato, per capire chi consuma cosa.</li>
+    <li><strong>NODMA e ND</strong> — nel filtro distretto, oltre ai distretti veri, trovi anche
+      <strong>NODMA</strong> (punti non distrettualizzati: cascine isolate, frazioni alimentate da altri
+      acquedotti...) e <strong>ND</strong> (distretto anomalo o mancante nel file). Non sono distretti
+      fatturabili — non entrano mai in Import_WMS né nel totale "Tutti i distretti" — ma restano visibili
+      qui a fini statistici, invece di sparire silenziosamente dai grafici.</li>
+    <li><strong>Top consumatori</strong> — le utenze con il volume più alto in un mese o in un anno, cliccabili
+      per aprire il dettaglio con indirizzo e cronologia letture.</li>
+  </ul>
+</div>
+{% endblock %}

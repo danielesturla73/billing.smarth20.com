@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block titolo %}Storia — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Storia dello sviluppo</h1>
+<p class="nota-metodologica">
+  Cronologia di come è nata e cresciuta questa applicazione — utile per ritrovare velocemente perché un
+  numero è cambiato da una sessione all'altra, senza dover leggere i commit git uno per uno.
+</p>
+
+<div class="panel storia-voce">
+  <div class="data">17/09/2026</div>
+  <h2>Scheletro applicativo e motore di calcolo</h2>
+  <p>Primo commit: container FastAPI con solo <code>/health</code>, e il motore di calcolo del Metodo B
+    portato dentro <code>app/motore_calcolo.py</code>.</p>
+  <ul>
+    <li>Rimosso del tutto il vecchio "Metodo A" (somma dei consumi dichiarati nel file), su richiesta
+      esplicita di Daniele: contava due volte le stime già conguagliate da una lettura reale successiva.</li>
+    <li>Archivio storico spostato da un CSV per comune a un unico database SQLite
+      (<code>archivio/archivio.db</code>), con deduplica su Codice Servizio + Data Lettura + Tipo Lettura.</li>
+    <li>Endpoint <code>/upload</code>, <code>/riepilogo</code>, <code>/diagnostica</code> (JSON grezzo).</li>
+  </ul>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">17/09/2026</div>
+  <h2>Prime pagine web</h2>
+  <p>Le prime pagine HTML vere (<code>/pagine/riepilogo</code>, <code>/pagine/diagnostica</code>), con lo
+    stile ripreso da WMS SmartH2O: header scuro con filtro Comune, tab di navigazione, KPI, tabelle.</p>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">18/09/2026</div>
+  <h2>Una vista più compatta</h2>
+  <ul>
+    <li>La tabella <code>Import_WMS</code> del riepilogo, da elenco lungo mese/distretto/mese/distretto a
+      tabella incrociata: mesi in riga, un distretto per colonna, totale a destra.</li>
+    <li>Numeri mostrati senza separatore delle migliaia in tutta l'app.</li>
+    <li>Gli avvisi e le 4 tabelle di diagnostica (Utenze scomparse, Segnalazioni, Anomalie Metodo B, Cessate
+      con stima finale) rese collassabili: chiuse di default, si aprono cliccandoci sopra.</li>
+    <li>Nuova pagina di dettaglio utenza: cronologia completa delle letture, indirizzo, e il motivo esatto
+      per cui è segnalata — raggiungibile cliccando un Codice Servizio da qualunque tabella di diagnostica o
+      dalla classifica dei maggiori consumatori.</li>
+  </ul>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">18/09/2026</div>
+  <h2>Cinque correzioni al Metodo B, verificate caso per caso</h2>
+  <p>Partendo da singole utenze controllate insieme a Daniele (non da una revisione generica del codice):</p>
+  <ul>
+    <li><strong>Stima iniziale corretta da una reale</strong> — una lettura reale più bassa della stima
+      iniziale di un segmento non è più segnalata come "reset contatore": è normale, la stima può essere per
+      eccesso quanto per difetto.</li>
+    <li><strong>Cambio contatore su contratto chiuso</strong> — un cambio contatore regolare in coincidenza
+      con la chiusura di un contratto non fa più scattare "cessata con stima finale" per errore (la lettura
+      reale di chiusura c'era, veniva solo scavalcata dal marcatore di apertura del contatore "nuovo").</li>
+    <li><strong>Letture sentinella in testa a un segmento</strong> — valori placeholder Neta H2O (tipo
+      9999999) vengono scartati anche quando sono la primissima lettura nota di un contatore, non solo
+      quando cadono in mezzo.</li>
+    <li><strong>Reset di contatore non marcato: da escluso a stimato</strong> — questi periodi non vengono
+      più azzerati, ma stimati con il ritmo medio storico della stessa utenza.</li>
+    <li><strong>Contatori padre/figlio</strong> — scoperto che i sotto-contatori (FIGLIO) venivano fatturati
+      due volte: una volta per conto proprio, una volta già inclusi nella lettura del contatore padre. Ora i
+      figli sono esclusi dal calcolo (restano nell'archivio, solo non generano volume proprio).</li>
+  </ul>
+  <p>
+    Impatto complessivo sui volumi fatturati: Belgioioso 239.089 → 240.501 m³ (+0,59%), Mortara
+    1.044.825 → 1.054.456 m³ (+0,92%) — quasi interamente dovuto alla stima dei reset non marcati, che prima
+    valevano zero.
+  </p>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">18/09/2026</div>
+  <h2>Grafici</h2>
+  <p>Nuova pagina <a href="/pagine/grafici">Grafici</a> (Chart.js, stile WMS SmartH2O): volumi mensili per
+    distretto scomposti in reale/provvisorio/interpolato con filtro distretto, consumi per classe d'uso, e
+    classifica dei maggiori consumatori per mese o anno.</p>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">18/09/2026</div>
+  <h2>Pagine Info e Storia</h2>
+  <p>Questa pagina, e la pagina <a href="/pagine/info">Info</a> che spiega in linguaggio semplice come
+    funziona il Metodo B e come si leggono i grafici — per chi usa l'app senza aver letto il codice.</p>
+</div>
+{% endblock %}
