@@ -44,6 +44,8 @@
        class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Info</a>
     <a href="/pagine/storia{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
        class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Storia</a>
+    <a href="/pagine/carica"
+       class="{% if pagina_attiva == 'carica' %}attivo{% endif %}">Carica</a>
     {% if request.state.utente.ruolo == 'admin' %}
     <a href="/admin/utenti"
        class="{% if pagina_attiva == 'admin' %}attivo{% endif %}">Amministrazione</a>

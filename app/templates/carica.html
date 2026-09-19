@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block titolo %}Carica estrazioni — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Carica estrazioni Neta H2O</h1>
+
+{% if esito %}
+<div class="panel">
+  <h2>Esito del caricamento</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>File</th><th>Comune riconosciuto</th><th class="num">Righe lette</th><th>Esito</th></tr></thead>
+    <tbody>
+    {% for f in esito.file %}
+    <tr>
+      <td>{{ f.file }}</td>
+      <td>{{ f.comune or '—' }}</td>
+      <td class="num">{{ f.righe_lette if f.righe_lette is not none else '—' }}</td>
+      <td>{% if f.errore %}<span class="badge stimato">non caricato</span> {{ f.errore }}{% else %}<span class="badge real">letto</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% for a in esito.archivi_aggiornati %}
+  <div class="esito-ok" style="margin-top:12px">
+    <strong>{{ a.comune }}</strong>: {{ a.righe_nuove_aggiunte_davvero }} righe nuove aggiunte,
+    {{ a.righe_duplicate_scartate }} duplicate scartate (archivio: {{ a.righe_archivio_prima }} → {{ a.righe_archivio_dopo }} righe).
+    I volumi si ricalcolano in background: dopo qualche secondo le pagine mostrano i numeri aggiornati.
+  </div>
+  {% for testo in a.avvisi %}<div class="avviso">{{ a.comune }}: {{ testo }}</div>{% endfor %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if request.state.utente.ruolo != 'viewer' %}
+<div class="panel">
+  <h2>Nuovo caricamento</h2>
+  <p class="nota-metodologica" style="margin-top:0">
+    Uno o più file Excel (.xlsx) estratti da Neta H2O. Il comune si riconosce dalla colonna LOCALITA dentro
+    il file, non dal nome. Le letture già presenti (stessa utenza, data e tipo) non si duplicano: si può
+    ricaricare un file senza rischi. Un file non valido viene segnalato senza bloccare gli altri.
+    Il caricamento di file grandi può richiedere qualche secondo.
+  </p>
+  <form method="post" action="/pagine/carica" enctype="multipart/form-data" class="form-riga"
+        onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Caricamento in corso…'">
+    <input type="file" name="files" accept=".xlsx" multiple required>
+    <button type="submit" class="btn-primario">Carica</button>
+  </form>
+</div>
+{% else %}
+<div class="avviso">Il tuo ruolo (viewer) permette solo di consultare: per caricare estrazioni serve il ruolo editor.</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Cosa c'è già in archivio</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Comune</th><th class="num">Letture</th><th class="num">Utenze</th><th>Prima lettura</th><th>Ultima lettura</th></tr></thead>
+    <tbody>
+    {% for c in stato_archivio %}
+    <tr><td>{{ c.comune }}</td><td class="num">{{ c.letture }}</td><td class="num">{{ c.utenze }}</td><td>{{ c.dal }}</td><td>{{ c.al }}</td></tr>
+    {% else %}
+    <tr><td colspan="5">Archivio vuoto.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Ultimi caricamenti (orari UTC)</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Quando</th><th>Chi</th><th>Dettagli</th></tr></thead>
+    <tbody>
+    {% for r in ultimi_caricamenti %}
+    <tr><td style="white-space:nowrap">{{ r.quando }}</td><td>{{ r.utente }}</td><td>{{ r.dettagli }}</td></tr>
+    {% else %}
+    <tr><td colspan="3">Nessun caricamento registrato da quando c'è il login.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

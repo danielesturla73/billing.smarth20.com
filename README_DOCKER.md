@@ -28,7 +28,7 @@ Cartella sul VPS: **`/opt/billing`**. Nome del container: **`billing`** (vedi `d
 1. **Grafici** — proposta scritta in `specifiche-applicativo-fatturazione-utenze.md` §6.2, **non ancora confermata da Daniele**: non costruirli senza chiedere prima (che tipo di grafico, quali pagine, Chart.js come da style guide).
 2. **Il pulsante "a un click"** verso WMS SmartH2O — endpoint che chiama l'API di WMS SmartH2O sulla rete Docker interna (`WMS_API_URL`, `INTERNAL_API_TOKEN` già in `.env`) e manda i dati di Import_WMS. Deve gestire l'upsert (i valori possono essere provvisori, vedi §4.8 del riepilogo di progetto).
 3. **Token interno verso WMS SmartH2O** (`INTERNAL_API_TOKEN`): il login degli utenti c'è (vedi "Accessi"), ma la chiamata a WMS non esiste ancora. Lato WMS l'autenticazione va imposta dal server, non solo dal frontend.
-4. **Upload dalla pagina web** — oggi `/upload` è solo un'API (va chiamata con `curl -F` o Postman); manca la schermata di caricamento file vera.
+4. ~~Upload dalla pagina web~~ — **fatto il 19/09/2026**: scheda Carica (`/pagine/carica`, editor e admin) con esito per file e per comune, avvisi (comune nuovo, nessuna riga nuova) e stato dell'archivio; `/upload` resta come API JSON. I file caricati restano in `input/`, gli omonimi con suffisso `_2`, `_3`. Nota: a parità di chiave (utenza+data+tipo) vince la riga già in archivio, quindi una nuova estrazione con valori corretti da Neta NON aggiorna le righe esistenti (da decidere con Daniele).
 
 ## Accessi (19/09/2026)
 

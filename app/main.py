@@ -84,9 +84,9 @@ def root():
     return RedirectResponse(url="/pagine/mappa")
 
 
-@app.post("/upload")
-async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...)):
-    """Carica una o piu' estrazioni Neta H2O (.xlsx) in un solo passaggio.
+async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
+    """Cuore del caricamento, condiviso da POST /upload (JSON) e dalla
+    pagina /pagine/carica (HTML).
 
     Per ogni file: lo salva in input/, riconosce il comune dalla colonna
     LOCALITA dentro il file (non dal nome del file — vedi specifiche,
@@ -96,9 +96,9 @@ async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...
     Excel, ecc.) viene segnalato con un errore SENZA bloccare il
     caricamento degli altri file del batch.
 
-    Non fa ancora nessun ricalcolo dei volumi: quello serve a un endpoint
-    separato, per non ripetere un calcolo pesante ad ogni singolo upload
-    quando si caricano piu' file insieme.
+    Non fa nessun ricalcolo immediato dei volumi (lo fa la cache in
+    background, vedi _invalida_comune): cosi' non si ripete un calcolo
+    pesante ad ogni singolo upload quando si caricano piu' file insieme.
     """
     INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -106,29 +106,44 @@ async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...
     file_per_comune: dict[str, list[Path]] = {}
 
     for upload in files:
-        nome_originale = upload.filename or "estrazione.xlsx"
-        percorso_salvato = INPUT_DIR / nome_originale
-        if percorso_salvato.exists():
-            # Non sovrascrivere silenziosamente un file gia' presente (es.
-            # stesso nome ricaricato per errore): si tiene comunque traccia
-            # del nuovo caricamento con un suffisso univoco. La deduplica
-            # vera e propria delle LETTURE avviene poi in database.aggiorna_letture,
-            # su chiave utenza+data+tipo, non sul nome del file.
-            percorso_salvato = INPUT_DIR / (
-                f"{percorso_salvato.stem}_{int(time.time())}{percorso_salvato.suffix}"
-            )
-
-        percorso_salvato.write_bytes(await upload.read())
+        # Solo il nome, senza cartelle: un filename tipo "../../x" non deve
+        # poter scrivere fuori da input/.
+        nome_originale = Path((upload.filename or "").replace("\\", "/")).name or "estrazione.xlsx"
+        contenuto = await upload.read()
+        # Non sovrascrivere mai un file gia' presente (es. stesso nome
+        # ricaricato per errore, o due file omonimi nello stesso invio): si
+        # tiene comunque traccia di ogni caricamento con un suffisso
+        # progressivo (_2, _3...), scelto in modo esclusivo ("xb") cosi'
+        # neanche due richieste contemporanee possono scrivere sullo stesso
+        # file. Il suffisso e' un contatore e non l'orario in secondi: con
+        # l'orario, tre file omonimi nello stesso secondo si sovrascrivevano
+        # (corretto il 19/09/2026). La deduplica vera e propria delle LETTURE
+        # avviene poi in database.aggiorna_letture, su chiave
+        # utenza+data+tipo, non sul nome del file.
+        radice = Path(nome_originale)
+        percorso_salvato = INPUT_DIR / radice.name
+        progressivo = 1
+        while True:
+            try:
+                with open(percorso_salvato, "xb") as f:
+                    f.write(contenuto)
+                break
+            except FileExistsError:
+                progressivo += 1
+                percorso_salvato = INPUT_DIR / f"{radice.stem}_{progressivo}{radice.suffix}"
 
         try:
             df = motore_calcolo.carica_estrazione(percorso_salvato)
         except Exception as exc:
+            messaggio = str(exc)
+            if "Excel file format cannot be determined" in messaggio or "zip file" in messaggio.lower():
+                messaggio = "Non è un file Excel (.xlsx) valido."
             risultati_file.append({
                 "file": nome_originale,
                 "salvato_come": percorso_salvato.name,
                 "comune": None,
                 "righe_lette": None,
-                "errore": str(exc),
+                "errore": messaggio,
             })
             continue
 
@@ -146,7 +161,17 @@ async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...
     for comune, percorsi in file_per_comune.items():
         _, stats = database.aggiorna_letture(percorsi, comune)
         _invalida_comune(comune)
-        archivi_aggiornati.append({"comune": comune, **stats})
+        avvisi = []
+        if comune == "SCONOSCIUTO":
+            avvisi.append("Comune non riconosciuto dalla colonna LOCALITA: controlla il file.")
+        if stats["righe_archivio_prima"] == 0:
+            avvisi.append(
+                "Comune nuovo in archivio: se i suoi distretti non sono nell'elenco ufficiale "
+                "(pagina Distretti) la classificazione si basa sull'euristica del prefisso."
+            )
+        elif stats["righe_nuove_aggiunte_davvero"] == 0:
+            avvisi.append("Nessuna riga nuova: le letture erano già tutte in archivio (file già caricato?).")
+        archivi_aggiornati.append({"comune": comune, **stats, "avvisi": avvisi})
         auth.registra(
             request.state.utente["username"], "upload_estrazione",
             f"{comune}: {stats['righe_nuove_aggiunte_davvero']} righe nuove, "
@@ -154,7 +179,62 @@ async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...
             accessi.ip_client(request),
         )
 
+    for r in risultati_file:
+        if r["errore"]:
+            auth.registra(
+                request.state.utente["username"], "upload_errore",
+                f"{r['file']}: {r['errore']}", accessi.ip_client(request),
+            )
+
     return {"file": risultati_file, "archivi_aggiornati": archivi_aggiornati}
+
+
+@app.post("/upload")
+async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...)):
+    """Versione API (JSON) del caricamento, vedi _carica_estrazioni. Serve
+    il cookie di sessione di un editor."""
+    return await _carica_estrazioni(request, files)
+
+
+def _stato_archivio() -> list[dict]:
+    """Per ogni comune in archivio: quante letture, quante utenze e da/a
+    quale data di lettura, cosi' si vede quale estrazione manca."""
+    with database.connessione() as conn:
+        if not database.tabella_esiste(conn):
+            return []
+        righe = conn.execute(
+            "SELECT LOCALITA, COUNT(*), COUNT(DISTINCT CODICE_SERVIZIO), MIN(DATA_LETTURA), MAX(DATA_LETTURA) "
+            "FROM letture WHERE LOCALITA IS NOT NULL GROUP BY LOCALITA ORDER BY LOCALITA"
+        ).fetchall()
+    return [
+        {"comune": r[0], "letture": r[1], "utenze": r[2], "dal": str(r[3])[:10], "al": str(r[4])[:10]}
+        for r in righe
+    ]
+
+
+def _contesto_carica(request: Request, esito: dict | None = None) -> dict:
+    return {
+        "pagina_attiva": "carica",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": None,
+        "stato_archivio": _stato_archivio(),
+        "ultimi_caricamenti": auth.leggi_registro(azione="upload_estrazione", limite=10),
+        "esito": esito,
+    }
+
+
+@app.get("/pagine/carica")
+def pagina_carica(request: Request):
+    """Schermata di caricamento delle estrazioni Neta H2O (solo editor/
+    admin, vedi il middleware): stessa logica di /upload, ma con l'esito
+    per file e per comune in pagina, invece del JSON."""
+    return templates.TemplateResponse(request, "carica.html", _contesto_carica(request))
+
+
+@app.post("/pagine/carica")
+async def pagina_carica_invio(request: Request, files: list[UploadFile] = File(...)):
+    esito = await _carica_estrazioni(request, files)
+    return templates.TemplateResponse(request, "carica.html", _contesto_carica(request, esito))
 
 
 def _tabella_json(df: pd.DataFrame) -> list[dict]:
