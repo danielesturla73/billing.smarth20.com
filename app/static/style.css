@@ -390,3 +390,25 @@ tr.distretto-evidenziato td:first-child { box-shadow: inset 3px 0 0 var(--teal);
 table.heatmap th { text-align: center; }
 table.heatmap td { text-align: center; font-family: var(--mono); font-size: 11px; padding: 6px 4px; min-width: 52px; }
 table.heatmap td.provv { outline: 1.5px dashed var(--amber); outline-offset: -3px; }
+
+/* Accessi (login, account, amministrazione utenti, registro) */
+.utente-header { display: flex; align-items: center; gap: 10px; }
+.utente-header a { color: #fff; text-decoration: none; font-weight: 500; }
+.utente-header form { margin: 0; }
+.utente-header .btn-ghost { cursor: pointer; }
+.ruolo-badge { font-size: 10.5px; letter-spacing: .4px; text-transform: uppercase; border: 1px solid rgba(255,255,255,.4); border-radius: 10px; padding: 1px 8px; }
+.box-accesso { max-width: 380px; margin: 48px auto; }
+.form-riga { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+.campo label { display: block; font-size: 11px; letter-spacing: .3px; text-transform: uppercase; color: var(--text-2); margin-bottom: 4px; }
+.campo input, .campo select, .form-riga select { border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 10px; font: inherit; background: #fff; }
+.box-accesso .campo { margin-bottom: 12px; }
+.box-accesso .campo input { width: 100%; }
+.btn-primario { background: var(--teal); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font: inherit; }
+.btn-primario:hover { background: var(--teal-dark); }
+.btn-link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; color: var(--teal); }
+.btn-link.pericolo { color: var(--red); }
+.esito-ok { border: 1px solid var(--green); background: var(--green-bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+.sotto-tab { display: flex; gap: 16px; margin-bottom: 12px; }
+.sotto-tab a.attivo { font-weight: 600; text-decoration: none; color: var(--text); }
+td form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 6px 0 0; }
+td form.inline input[type=password] { width: 130px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; }

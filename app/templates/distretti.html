@@ -28,6 +28,7 @@
 </div>
 {% endif %}
 
+{% if request.state.utente.ruolo != 'viewer' %}
 <div class="panel">
   <h2>Importa da file</h2>
   <p class="nota-metodologica" style="margin-top:0">
@@ -87,6 +88,7 @@
     {% if riga_modifica %}<a href="/pagine/distretti" style="font-size:13px">Annulla modifica</a>{% endif %}
   </form>
 </div>
+{% endif %}
 
 <div class="panel">
   <h2>Elenco{% if comune_selezionato %} — {{ comune_selezionato }}{% endif %} ({{ righe|length }})</h2>
@@ -107,6 +109,7 @@
           <td>{% if r.comune_ufficiale %}{{ r.comune_ufficiale }}{% else %}<span style="color:var(--amber)">da completare</span>{% endif %}</td>
           <td>{{ r.comuni_associabili }}</td>
           <td style="white-space:nowrap">
+            {% if request.state.utente.ruolo != 'viewer' %}
             <a href="/pagine/distretti?modifica={{ r.codice_distretto }}{{ '&comune=' + comune_selezionato if comune_selezionato else '' }}">Modifica</a>
             &nbsp;·&nbsp;
             <form method="post" action="/distretti/elimina" style="display:inline"
@@ -115,6 +118,7 @@
               {% if comune_selezionato %}<input type="hidden" name="comune" value="{{ comune_selezionato }}">{% endif %}
               <button type="submit" style="background:none;border:none;color:var(--red);cursor:pointer;padding:0;font:inherit;text-decoration:underline">Elimina</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

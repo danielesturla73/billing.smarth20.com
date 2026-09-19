@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block titolo %}Account — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Il mio account</h1>
+<p class="nota-metodologica">
+  {{ request.state.utente.username }}{% if request.state.utente.nome %} — {{ request.state.utente.nome }}{% endif %},
+  ruolo <strong>{{ request.state.utente.ruolo }}</strong>.
+</p>
+{% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
+{% if msg %}<div class="esito-ok">{{ msg }}</div>{% endif %}
+<div class="panel">
+  <h2>Cambia password</h2>
+  <p class="nota-metodologica" style="margin-top:0">Dopo il cambio si esce e si rientra con la nuova password.</p>
+  <form method="post" action="/account/password" class="form-riga">
+    <div class="campo"><label>Password attuale</label><input type="password" name="attuale" required autocomplete="current-password"></div>
+    <div class="campo"><label>Nuova (almeno 10 caratteri)</label><input type="password" name="nuova" required minlength="10" autocomplete="new-password"></div>
+    <div class="campo"><label>Ripeti nuova</label><input type="password" name="conferma" required minlength="10" autocomplete="new-password"></div>
+    <button type="submit" class="btn-primario">Cambia password</button>
+  </form>
+</div>
+{% endblock %}

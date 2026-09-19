@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block titolo %}Registro azioni — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Amministrazione</h1>
+<div class="sotto-tab">
+  <a href="/admin/utenti">Utenti</a>
+  <a href="/admin/registro" class="attivo">Registro azioni</a>
+</div>
+<div class="panel">
+  <h2>Registro azioni (ultime {{ righe|length }}, orari UTC)</h2>
+  <form method="get" class="form-riga" style="margin-bottom:12px">
+    <div class="campo"><label>Utente</label>
+      <select name="utente"><option value="">Tutti</option>
+        {% for u in utenti %}<option value="{{ u.username }}" {% if u.username == filtro_utente %}selected{% endif %}>{{ u.username }}</option>{% endfor %}
+      </select></div>
+    <div class="campo"><label>Azione</label>
+      <select name="azione"><option value="">Tutte</option>
+        {% for a in azioni %}<option value="{{ a }}" {% if a == filtro_azione %}selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select></div>
+    <button type="submit" class="btn-primario">Filtra</button>
+  </form>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Quando</th><th>Utente</th><th>Azione</th><th>Dettagli</th><th>IP</th></tr></thead>
+    <tbody>
+    {% for r in righe %}
+    <tr><td style="white-space:nowrap">{{ r.quando }}</td><td>{{ r.utente }}</td><td>{{ r.azione }}</td><td>{{ r.dettagli }}</td><td>{{ r.ip }}</td></tr>
+    {% else %}
+    <tr><td colspan="5">Nessuna azione registrata.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

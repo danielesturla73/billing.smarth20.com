@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block titolo %}Recupero admin — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<div class="panel box-accesso">
+  <h2>Recupero amministratore</h2>
+  <p class="nota-metodologica" style="margin-top:0">
+    Imposta una nuova password per un admin esistente, con il codice <code>SETUP_CODE</code> del
+    <code>.env</code>. Finito, togli la riga dal <code>.env</code> e ricrea il container: la pagina si spegne.
+  </p>
+  {% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
+  <form method="post" action="/recupero">
+    <div class="campo"><label>Codice di setup</label><input type="password" name="codice" required autocomplete="off"></div>
+    <div class="campo"><label>Username admin</label><input type="text" name="username" required></div>
+    <div class="campo"><label>Nuova password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"></div>
+    <div class="campo"><label>Ripeti password</label><input type="password" name="conferma" required minlength="10" autocomplete="new-password"></div>
+    <button type="submit" class="btn-primario">Reimposta password</button>
+  </form>
+</div>
+{% endblock %}

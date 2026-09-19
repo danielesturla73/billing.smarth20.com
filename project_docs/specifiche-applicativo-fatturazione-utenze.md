@@ -168,7 +168,7 @@ Daniele ha fatto notare il caso d'uso reale: il bilancio si fa per trimestre, co
 
 **Nuovi fogli nell'Excel**: MetodoB_Trimestrale, Confronto_Metodi_Trimestrale, Anomalie_MetodoB, Cessate_Con_Stima_Finale.
 
-**Ancora aperto** (da chiedere/verificare, non solo a Neta ma anche internamente): come valorizzare una STIMATA finale che segue un'altra STIMATA finale (due stime consecutive senza reale in mezzo, mai capitato nell'esempio usato per validare) — per ora si considera solo l'ultima, scartando le precedenti, per coerenza con la regola "si usa sempre il dato più recente disponibile", ma non è stato esplicitamente confermato da Daniele.
+**Risolto (verificato nel codice il 19/09/2026)**: più STIMATE consecutive in coda a un segmento, senza lettura reale dopo, vengono contate TUTTE coi valori dichiarati (CONSUMO e GG_LETT_PREC) come valore provvisorio, non solo l'ultima (vedi l'aggiornamento "valori provvisori" sopra). Daniele (19/09/2026): GG_LETT_PREC è la differenza di giorni dalla lettura precedente (per una stima, dalla precedente anche stimata; per una effettiva, dalla precedente effettiva) e serve solo per le stime, non per il calcolo tra letture reali.
 
 ### 2.11 Secondo comune testato: Mortara — ora con un anno intero di dati (aggiornato)
 Daniele ha caricato la prima estrazione di un comune diverso da Belgioioso: Mortara, periodo 01/05/2026–30/06/2026 (`MORTARA_Script PVACQUE0103_01052026_30062026.xlsx`), chiedendo un "calcolo veloce" e se esistevano estrazioni precedenti già caricate per questo comune.

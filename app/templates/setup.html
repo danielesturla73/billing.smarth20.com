@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block titolo %}Prima configurazione — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<div class="panel box-accesso">
+  <h2>Crea l'amministratore</h2>
+  <p class="nota-metodologica" style="margin-top:0">
+    Nessun utente esiste ancora. Serve il codice <code>SETUP_CODE</code> scritto nel file
+    <code>.env</code> sul server. Questa pagina sparisce appena l'amministratore è creato.
+  </p>
+  {% if not codice_configurato %}
+  <div class="avviso">SETUP_CODE non è configurato nel .env del container: aggiungilo e ricrea il container.</div>
+  {% endif %}
+  {% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
+  <form method="post" action="/setup">
+    <div class="campo"><label>Codice di setup</label><input type="password" name="codice" required autocomplete="off"></div>
+    <div class="campo"><label>Username</label><input type="text" name="username" required autocomplete="username"></div>
+    <div class="campo"><label>Nome completo</label><input type="text" name="nome"></div>
+    <div class="campo"><label>Password (almeno 10 caratteri)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"></div>
+    <div class="campo"><label>Ripeti password</label><input type="password" name="conferma" required minlength="10" autocomplete="new-password"></div>
+    <button type="submit" class="btn-primario">Crea amministratore</button>
+  </form>
+</div>
+{% endblock %}

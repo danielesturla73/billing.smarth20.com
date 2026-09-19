@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block titolo %}Amministrazione — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Amministrazione</h1>
+<div class="sotto-tab">
+  <a href="/admin/utenti" class="attivo">Utenti</a>
+  <a href="/admin/registro">Registro azioni</a>
+</div>
+{% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
+{% if msg %}<div class="esito-ok">{{ msg }}</div>{% endif %}
+
+<div class="panel">
+  <h2>Nuovo utente</h2>
+  <form method="post" action="/admin/utenti/crea" class="form-riga">
+    <div class="campo"><label>Username</label><input type="text" name="username" required></div>
+    <div class="campo"><label>Password (min. 10)</label><input type="password" name="password" required minlength="10" autocomplete="new-password"></div>
+    <div class="campo"><label>Nome completo</label><input type="text" name="nome"></div>
+    <div class="campo"><label>Ruolo</label>
+      <select name="ruolo">{% for r in ruoli %}<option value="{{ r }}">{{ r|capitalize }}</option>{% endfor %}</select></div>
+    <button type="submit" class="btn-primario">Crea utente</button>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Utenti ({{ utenti|length }})</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Username</th><th>Nome</th><th>Ruolo</th><th>Attivo</th><th>Azioni</th></tr></thead>
+    <tbody>
+    {% for u in utenti %}
+    {% set proprio = u.id == request.state.utente.id %}
+    <tr>
+      <td>{{ u.username }}{% if proprio %} <span class="badge nodata">tu</span>{% endif %}</td>
+      <td>{{ u.nome }}</td>
+      <td>
+        <form method="post" action="/admin/utenti/{{ u.id }}/ruolo" class="inline">
+          <select name="ruolo" onchange="this.form.submit()">
+            {% for r in ruoli %}<option value="{{ r }}" {% if r == u.ruolo %}selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}
+          </select>
+        </form>
+      </td>
+      <td>{% if u.attivo %}<span class="badge real">sì</span>{% else %}<span class="badge stimato">no</span>{% endif %}</td>
+      <td style="white-space:nowrap">
+        <form method="post" action="/admin/utenti/{{ u.id }}/password" class="inline">
+          <input type="password" name="password" placeholder="nuova password" minlength="10" required autocomplete="new-password">
+          <button type="submit" class="btn-link">Password</button>
+        </form>
+        {% if not proprio %}
+        <form method="post" action="/admin/utenti/{{ u.id }}/attivo" class="inline">
+          <input type="hidden" name="attivo" value="{{ 0 if u.attivo else 1 }}">
+          <button type="submit" class="btn-link">{{ 'Disattiva' if u.attivo else 'Riattiva' }}</button>
+        </form>
+        <form method="post" action="/admin/utenti/{{ u.id }}/elimina" class="inline"
+              onsubmit="return confirm('Eliminare l\'utente {{ u.username }}?')">
+          <button type="submit" class="btn-link pericolo">Elimina</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

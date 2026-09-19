@@ -12,8 +12,11 @@ services:
     # browser che il container risponda). In produzione, dietro un
     # reverse proxy (come Caddy per WMS SmartH2O), si può anche togliere
     # questa riga e lasciare che il traffico entri solo dalla rete Docker.
+    # Solo su localhost (dal 19/09/2026): l'app ha ora il login, ma la porta
+    # aperta su 0.0.0.0 permetterebbe di aggirare Caddy (e di falsificare
+    # X-Forwarded-For, su cui si basa il limite ai tentativi di login).
     ports:
-      - "8010:8000"
+      - "127.0.0.1:8010:8000"
     volumes:
       # Dati persistenti: sopravvivono a un riavvio/aggiornamento del
       # container, perché vivono sul disco della VPS, non dentro l'immagine.

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 "Analisi Consumi da Fatturazione" (formerly "Fatturazione Utenze") — a water-consumption analysis service for Daniele. The purpose is NOT billing: it is the water balance and leak reduction. It reads quarterly meter-reading extracts from the Neta H2O CRM (one Excel file per comune/municipality) and computes the billed/consumed volume per water district (`distretto`) per month, which eventually feeds the `district_billed` table of a separate, already-live app called **WMS SmartH2O**. WMS holds the inflow (immesso, daily/monthly) and night minimum flows, and does the top-down comparison inflow vs. billed: a monthly trend, consolidated once a year. Estimated (provisional) months are acceptable for the trend, as long as they are flagged and later upserted (see below). Names like `district_billed`, `Volume Fatturato (m3)` and `Import_WMS` stay unchanged (WMS format).
 
-The two apps are deliberately separate (see `project_docs/riepilogo-progetto-wms-smarth2o.md`, §4.7): no shared database, no shared container. This app is currently a bare skeleton (`/health` only) sitting next to a mature, fully-working calculation engine that isn't wired to any endpoint yet — that wiring is the main open work.
+The two apps are deliberately separate (see `project_docs/riepilogo-progetto-wms-smarth2o.md`, §4.7): no shared database, no shared container. The web app (FastAPI + Jinja2 pages, SQLite archive, upload, per-comune results cache, login with viewer/editor/admin roles and an audit log) sits on top of the calculation engine; the main open work is the one-click push to WMS (see below and `README_DOCKER.md`).
 
 Read `project_docs/specifiche-applicativo-fatturazione-utenze.md` and `project_docs/riepilogo-progetto-wms-smarth2o.md` before making calculation-logic or architecture decisions — they record decisions already made with Daniele (including ones that reversed earlier approaches). Don't re-derive or re-litigate something already settled there.
 
@@ -46,7 +46,7 @@ esporta_excel(r, 'output/test.xlsx')
 2. **Historical archive** (`carica_archivio`, `aggiorna_archivio`) — every new extract is appended to a CSV on disk, deduplicated on `CHIAVE_ARCHIVIO` = (`CODICE_SERVIZIO`, `DATA_LETTURA`, `TIPO_LETTURA`). This is what lets each new quarterly extract just merge into the existing history instead of requiring a full reload. There's one archive per comune in practice (`archivio_letture.csv`, `archivio_letture_mortara.csv`).
 
 3. **Metodo B — the only billing calculation method** (`calcola_periodi_metodo_b` and everything downstream of it). This is the load-bearing piece of domain logic in the whole codebase:
-   - Each meter reading covers a period of `GG_LETT_PREC` days ending on `DATA_LETTURA`, and that period is prorated across calendar months in proportion to overlapping days (a reading's consumption is not "this month's consumption").
+   - Each period between two real readings (dates only, not `GG_LETT_PREC`) is prorated across calendar months in proportion to overlapping days (a reading's consumption is not "this month's consumption"). `GG_LETT_PREC`/`CONSUMO` are used only for the trailing estimates not yet closed by a real reading (all of them counted, as provisional values), where `GG_LETT_PREC` is the days since the previous reading (Daniele, 19/09/2026).
    - Billed volume is the **physical difference between consecutive real readings** (`TIPI_LETTURA_REALE`), not the `CONSUMO`/`GG_LETT_PREC` figures Neta H2O declares. Estimated readings (`STIMATA` and similar) in between two real readings are discarded/absorbed, never summed — a real reading reconciles (conguaglia) whatever was estimated before it, it doesn't add to it.
    - There used to be a "Metodo A" (sum of declared `CONSUMO`) kept for comparison. **It has been fully removed from the code** per Daniele's explicit instruction, because it systematically double-counted already-reconciled estimates. Do not reintroduce it, even as a diagnostic/comparison column — if you need to reference why, see spec doc §2.4/§2.10 and project summary §4.4.
    - Meter swaps (`TIPI_INIZIO_CONTATORE`) always break the reading chain — a difference is never computed across two different physical meters.
@@ -60,6 +60,10 @@ esporta_excel(r, 'output/test.xlsx')
 **Only ever one number per district/month/quarter** (Metodo B) flows anywhere in this codebase — don't build any feature that reintroduces a second method or a Metodo A/B comparison.
 
 **`Import_WMS`** (i.e. `RisultatoElaborazione.volumi_distretto_mese`) is the one output that matters for the WMS SmartH2O integration: one row per (month, district code, billed m³), using the district's Neta H2O *code* (e.g. `DBLG03`), not any internal numeric ID — WMS SmartH2O does that translation on its side.
+
+## Access control
+
+Separate login from WMS (`app/auth.py`, `app/accessi.py`; details in `README_DOCKER.md`, section "Accessi"). Roles viewer < editor < admin, enforced server-side by a default-deny middleware — any new route needs login, and any non-GET needs editor, without extra code; `/admin/*` needs admin. When adding an action that changes data, log it with `auth.registra(utente, azione, dettagli, ip)` (audit trail requested by Daniele: who did what). Never ask for, print, or store passwords or `SETUP_CODE` in chat/git; the `.env` stays out of git. Keep port 8010 bound to 127.0.0.1.
 
 ## Integration with WMS SmartH2O (not yet built)
 

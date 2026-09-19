@@ -11,6 +11,7 @@
 <body>
   <header>
     <div class="titolo">Analisi Consumi da Fatturazione</div>
+    {% if request.state.utente %}
     <form class="filtri" method="get">
       <label for="comune">Comune</label>
       <select id="comune" name="comune" onchange="this.form.submit()">
@@ -20,7 +21,14 @@
         {% endfor %}
       </select>
     </form>
+    <div class="utente-header">
+      <a href="/account">{{ request.state.utente.nome or request.state.utente.username }}</a>
+      <span class="ruolo-badge">{{ request.state.utente.ruolo }}</span>
+      <form method="post" action="/logout"><button type="submit" class="btn-ghost">Esci</button></form>
+    </div>
+    {% endif %}
   </header>
+  {% if request.state.utente %}
   <nav class="tabs">
     <a href="/pagine/riepilogo{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
        class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Riepilogo</a>
@@ -36,7 +44,12 @@
        class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Info</a>
     <a href="/pagine/storia{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
        class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Storia</a>
+    {% if request.state.utente.ruolo == 'admin' %}
+    <a href="/admin/utenti"
+       class="{% if pagina_attiva == 'admin' %}attivo{% endif %}">Amministrazione</a>
+    {% endif %}
   </nav>
+  {% endif %}
   <main>
     {% block contenuto %}{% endblock %}
   </main>

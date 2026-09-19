@@ -15,8 +15,9 @@ Cosa NON c'e' ancora, e va costruito (pensato per Claude Code):
 - il pulsante "a un click" che invia i dati a WMS SmartH2O (vedi 4.9:
   per ora e' un invio manuale/con conferma umana, non uno scheduler
   automatico)
-- l'autenticazione (sia per chi usa l'interfaccia, sia il token interno
-  verso WMS SmartH2O, vedi INTERNAL_API_TOKEN in .env.example)
+- il token interno verso WMS SmartH2O (INTERNAL_API_TOKEN in .env.example);
+  l'autenticazione di chi usa l'interfaccia c'e' dal 19/09/2026 (accessi.py,
+  auth.py: login, ruoli viewer/editor/admin, registro azioni)
 - upload/gestione utenti dalle pagine web (oggi solo via /upload, API)
 
 Il motore di calcolo vero e proprio resta in motore_calcolo.py (Metodo
@@ -39,7 +40,7 @@ from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import database, motore_calcolo
+from app import accessi, auth, database, motore_calcolo
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -62,6 +63,9 @@ templates.env.globals["css_version"] = int(
 # Docker montati in docker-compose.yml.
 INPUT_DIR = Path("input")
 
+# Login, ruoli e registro azioni (middleware default-deny): vedi accessi.py.
+accessi.registra_accessi(app, templates)
+
 
 @app.get("/health")
 def health_check():
@@ -81,7 +85,7 @@ def root():
 
 
 @app.post("/upload")
-async def upload_estrazioni(files: list[UploadFile] = File(...)):
+async def upload_estrazioni(request: Request, files: list[UploadFile] = File(...)):
     """Carica una o piu' estrazioni Neta H2O (.xlsx) in un solo passaggio.
 
     Per ogni file: lo salva in input/, riconosce il comune dalla colonna
@@ -143,6 +147,12 @@ async def upload_estrazioni(files: list[UploadFile] = File(...)):
         _, stats = database.aggiorna_letture(percorsi, comune)
         _invalida_comune(comune)
         archivi_aggiornati.append({"comune": comune, **stats})
+        auth.registra(
+            request.state.utente["username"], "upload_estrazione",
+            f"{comune}: {stats['righe_nuove_aggiunte_davvero']} righe nuove, "
+            f"{stats['righe_duplicate_scartate']} duplicate scartate — file: {', '.join(p.name for p in percorsi)}",
+            accessi.ip_client(request),
+        )
 
     return {"file": risultati_file, "archivi_aggiornati": archivi_aggiornati}
 
@@ -805,6 +815,10 @@ async def importa_distretti(request: Request, file: UploadFile = File(...)):
     finally:
         percorso_temp.unlink(missing_ok=True)
 
+    auth.registra(
+        request.state.utente["username"], "distretti_importa",
+        f"{nome_originale}: " + (f"errore ({errore})" if errore else str(esito)), accessi.ip_client(request),
+    )
     return templates.TemplateResponse(
         request, "distretti.html",
         _pagina_distretti_contesto(request, modifica=None, errore_import=errore, esito_import=esito),
@@ -833,6 +847,10 @@ async def importa_confini_endpoint(request: Request, file: UploadFile = File(...
     finally:
         percorso_temp.unlink(missing_ok=True)
 
+    auth.registra(
+        request.state.utente["username"], "confini_importa",
+        f"{nome_originale}: " + (f"errore ({errore})" if errore else str(esito)), accessi.ip_client(request),
+    )
     return templates.TemplateResponse(
         request, "distretti.html",
         _pagina_distretti_contesto(
@@ -843,6 +861,7 @@ async def importa_confini_endpoint(request: Request, file: UploadFile = File(...
 
 @app.post("/distretti/salva")
 def salva_distretto(
+    request: Request,
     codice_distretto: str = Form(...),
     comune_ufficiale: str = Form(...),
     comuni_associabili: str = Form(""),
@@ -854,15 +873,21 @@ def salva_distretto(
     nell'header (se c'era), per tornare alla stessa vista filtrata invece
     di perderla ad ogni salvataggio."""
     motore_calcolo.upsert_distretto(codice_distretto, comune_ufficiale, comuni_associabili, nome_distretto)
+    auth.registra(
+        request.state.utente["username"], "distretto_salvato",
+        f"{codice_distretto} -> {comune_ufficiale}" + (f" (associabili: {comuni_associabili})" if comuni_associabili else ""),
+        accessi.ip_client(request),
+    )
     url = f"/pagine/distretti?comune={comune}" if comune else "/pagine/distretti"
     return RedirectResponse(url=url, status_code=303)
 
 
 @app.post("/distretti/elimina")
-def elimina_distretto_endpoint(codice_distretto: str = Form(...), comune: str = Form("")):
+def elimina_distretto_endpoint(request: Request, codice_distretto: str = Form(...), comune: str = Form("")):
     """Rimuove una riga dall'elenco (il distretto torna a ricadere
     sull'euristica del prefisso al prossimo ricalcolo)."""
     motore_calcolo.elimina_distretto(codice_distretto)
+    auth.registra(request.state.utente["username"], "distretto_eliminato", codice_distretto, accessi.ip_client(request))
     url = f"/pagine/distretti?comune={comune}" if comune else "/pagine/distretti"
     return RedirectResponse(url=url, status_code=303)
 

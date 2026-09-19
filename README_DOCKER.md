@@ -1,12 +1,12 @@
 # Fatturazione Utenze — container Docker "billing"
 
-Nota per chi continua lo sviluppo (Claude Code) e per Daniele: cosa c'è già, cosa manca, come si avvia. **Aggiornato al 17/09/2026, fine sessione.**
+Nota per chi continua lo sviluppo (Claude Code) e per Daniele: cosa c'è già, cosa manca, come si avvia. **Aggiornato al 17/09/2026; sezione Accessi aggiunta il 19/09/2026.**
 
 Cartella sul VPS: **`/opt/billing`**. Nome del container: **`billing`** (vedi `docker-compose.yml`). Repository GitHub: **`github.com/danielesturla73/billing.smarth20.com`** (branch `main`, già collegato con `git remote`).
 
 ## Stato reale sulla VPS (verificato il 17/09/2026)
 
-- Container `billing`: **su e "healthy"**, porta `8010` (host) → `8000` (interna), pubblico su `billing.smarth20.com` (HTTPS via Caddy).
+- Container `billing`: **su e "healthy"**, porta `8010` pubblicata **solo su 127.0.0.1** (dal 19/09/2026) → `8000` (interna), pubblico su `billing.smarth20.com` (HTTPS via Caddy, che raggiunge il container dalla rete Docker).
 - Rete Docker condivisa `rete-interna-idrico`: **collegata** (`billing`, `wms-smarth20`, `caddy`).
 - `.env` presente e compilato (token vero, `WMS_API_URL=http://wms-smarth20:80`) — **non ancora usato da nessun endpoint** (il pulsante "a un click" verso WMS SmartH2O non esiste ancora, vedi sotto).
 - Repository git **inizializzato e pushato** su GitHub (vedi sopra). `.gitignore`/`.dockerignore` già a posto: niente segreti, dati reali o CSV/DB finiscono in git.
@@ -27,9 +27,20 @@ Cartella sul VPS: **`/opt/billing`**. Nome del container: **`billing`** (vedi `d
 
 1. **Grafici** — proposta scritta in `specifiche-applicativo-fatturazione-utenze.md` §6.2, **non ancora confermata da Daniele**: non costruirli senza chiedere prima (che tipo di grafico, quali pagine, Chart.js come da style guide).
 2. **Il pulsante "a un click"** verso WMS SmartH2O — endpoint che chiama l'API di WMS SmartH2O sulla rete Docker interna (`WMS_API_URL`, `INTERNAL_API_TOKEN` già in `.env`) e manda i dati di Import_WMS. Deve gestire l'upsert (i valori possono essere provvisori, vedi §4.8 del riepilogo di progetto).
-3. **Autenticazione** — sia per l'interfaccia web (chi carica file, chi preme "invia a WMS") sia il token interno verso WMS SmartH2O. Oggi tutto è aperto, nessun login.
+3. **Token interno verso WMS SmartH2O** (`INTERNAL_API_TOKEN`): il login degli utenti c'è (vedi "Accessi"), ma la chiamata a WMS non esiste ancora. Lato WMS l'autenticazione va imposta dal server, non solo dal frontend.
 4. **Upload dalla pagina web** — oggi `/upload` è solo un'API (va chiamata con `curl -F` o Postman); manca la schermata di caricamento file vera.
-5. **Da decidere con Daniele prima di costruire**: quanti livelli di permesso servono (viewer/editing/admin?), se il login può essere condiviso con WMS SmartH2O.
+
+## Accessi (19/09/2026)
+
+Login separato da WMS SmartH2O (le due app non condividono database). Codice in `app/auth.py` (utenti, sessioni, registro, hash scrypt) e `app/accessi.py` (middleware e pagine).
+
+- **Ruoli a scalare**: viewer (consulta) < editor (upload, distretti, mappa, in futuro invio a WMS) < admin (utenti e registro). Un account per persona, così il registro dice chi ha fatto cosa.
+- **Default deny**: il middleware richiede login su ogni rotta (eccetto `/health`, `/static`, `/login`, `/logout`, `/setup`, `/recupero`), editor per ogni POST, admin per `/admin/*`. Una rotta nuova è protetta anche senza pensarci. Il controllo è solo lato server.
+- **Registro azioni** in `/admin/registro` (tabella `registro_azioni` in `archivio.db`): login e login falliti, upload, distretti/confini, gestione utenti.
+- **Password**: solo hash, non recuperabili, minimo 10 caratteri. Dopo 5 tentativi falliti in 10 minuti (per username o IP) si risponde 429.
+- **Prima configurazione**: senza utenti, `/setup` crea il primo admin, ma solo con `SETUP_CODE` del `.env`. Appena esiste un utente la pagina si chiude.
+- **Password admin dimenticata**: aggiungere `SETUP_CODE=...` al `.env`, `docker compose up -d` (un semplice restart non rilegge il `.env`), usare `/recupero`, poi togliere la riga e ricreare il container. Senza la riga `/setup` e `/recupero` non esistono. Meglio avere due admin.
+- La porta 8010 deve restare su 127.0.0.1: il limite tentativi si fida di `X-Forwarded-For`, che con la porta aperta si falsificherebbe.
 
 ## Ambiguità nota, non affrontata (bassa priorità)
 
