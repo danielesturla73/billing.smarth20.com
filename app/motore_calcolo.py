@@ -404,6 +404,15 @@ def classifica_distretto(df: pd.DataFrame, mappa_distretti: dict | None = None) 
     convenzioni diverse (es. "NODMA") — qualunque codice che inizia per
     "NO" viene trattato come case_sparse, non anomalia.
 
+    Precisazioni di Daniele (19/09/2026): "*" e' lo stesso di campo vuoto
+    (distretto mancante). Un codice di un altro comune su un'utenza di
+    questa estrazione (es. DBRN01 in Belgioioso) NON sposta l'utenza in quel
+    comune: il comune prevale e il codice DMA e' sbagliato, perche'
+    l'associazione massiva utenza->distretto e' stata fatta con
+    un'operazione GIS sulla posizione dell'ultima lettura del letturista,
+    a volte errata (dato inviato da altrove, lettura dichiarata sul posto
+    ma non fatta).
+
     Per i codici che NON iniziano per "NO", la classificazione usa PRIMA
     l'elenco ufficiale (vedi carica_mappa_distretti_comuni): un codice
     riconosciuto e' 'valido' se il suo comune ufficiale e' quello di questa
@@ -446,9 +455,11 @@ def classifica_distretto(df: pd.DataFrame, mappa_distretti: dict | None = None) 
         if distretto in mappa_distretti:
             comune_ufficiale, _ = mappa_distretti[distretto]
             return (
-                f"Distretto '{row['DISTRETTO']}' appartiene ufficialmente a {comune_ufficiale}, "
-                f"non a {comune_corrente} ne' a un suo comune associabile — verificare con Neta H2O "
-                "se e' un errore o va aggiunto come associabile in project_docs/distretti_comuni.csv"
+                f"Codice DMA '{row['DISTRETTO']}' appartiene a {comune_ufficiale}, ma l'utenza e' "
+                f"nel comune di {comune_corrente}: il comune prevale, il codice DMA e' quasi certamente "
+                "errato (associazione GIS sulla posizione dell'ultima lettura). Se invece e' una "
+                "frazione alimentata dal comune vicino, aggiungerlo come associabile in "
+                "project_docs/distretti_comuni.csv"
             )
         return f"Distretto '{row['DISTRETTO']}' non appartiene al comune di questa estrazione (prefisso atteso '{prefisso}')"
 
