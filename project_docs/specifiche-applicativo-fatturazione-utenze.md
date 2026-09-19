@@ -381,3 +381,6 @@ La riunione con Neta H2O non si è ancora svolta. Nel frattempo, queste domande 
 
 **Sul collegamento distretto-utenza**
 9. Il campo DISTRETTO che troviamo già dentro l'estrazione Neta H2O (es. DBLG03, DMR10): è aggiornato/affidabile allo stesso modo per tutti i comuni, o ci sono comuni dove questo campo è meno curato?
+
+**Sulle estrazioni ripetute (aggiunta 19/09/2026)**
+10. Capita che Neta H2O corregga a posteriori una lettura già estratta (stessa utenza, data e tipo di lettura, ma LETTURA o CONSUMO diversi in una nuova estrazione)? Oggi, a parità di chiave, l'archivio tiene la riga già presente e ignora quella nuova (`database.aggiorna_letture`): una correzione fatta da Neta sulla stessa lettura non verrebbe recepita, e non se ne avrebbe traccia. **Decisione di Daniele (19/09/2026): per ora si lascia così**, perché è ritenuto poco probabile che un dato venga corretto dopo l'estrazione. Se la risposta fosse "sì, capita", andrebbe cambiata la regola (la nuova riga sostituisce la vecchia) registrando ogni valore sostituito, e i volumi già inviati a WMS andrebbero corretti con l'upsert. Non riguarda il conguaglio STIMATA → EFFETTIVA, che ha tipo diverso quindi chiave diversa e funziona già.
