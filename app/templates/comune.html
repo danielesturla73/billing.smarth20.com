@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block titolo %}{{ comune }} — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>{{ comune }}
+  {% if stato_comune == 'consolidato' %}<span class="badge real">Consolidato</span>
+  {% elif stato_comune == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
+  {% elif stato_comune == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Contiene interpolato</span>
+  {% endif %}
+</h1>
+<p class="nota-metodologica">
+  Ultimo mese in archivio: <strong>{{ ultimo_mese or '—' }}</strong> ·
+  <a href="/pagine/mappa">← torna alla mappa</a> ·
+  <a href="/pagine/grafici?comune={{ comune | urlencode }}">Top consumatori</a> ·
+  <a href="/pagine/diagnostica?comune={{ comune | urlencode }}">Segnalazioni</a> ·
+  <a href="/pagine/riepilogo?comune={{ comune | urlencode }}">Riepilogo</a>
+</p>
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="etichetta">Volume {{ ultimo_mese or '' }}</div>
+    <div class="valore">{{ "{:,.0f}".format(volume_mese).replace(",", ".") }} m³</div>
+  </div>
+  <div class="kpi">
+    <div class="etichetta">Vs stesso mese anno prima</div>
+    <div class="valore">{% if variazione is none %}—{% else %}{{ '%+.1f' | format(variazione) }}%{% endif %}</div>
+  </div>
+  <div class="kpi {% if trimestre_kpi and trimestre_kpi.provvisorio %}warn{% endif %}">
+    <div class="etichetta">Ultimo trimestre {{ trimestre_kpi.trimestre if trimestre_kpi else '' }}{% if trimestre_kpi and trimestre_kpi.provvisorio %} (con stime){% endif %}</div>
+    <div class="valore">{% if trimestre_kpi %}{{ "{:,.0f}".format(trimestre_kpi.volume).replace(",", ".") }} m³{% else %}—{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="etichetta">Utenze</div>
+    <div class="valore">{{ utenze_totali }}</div>
+  </div>
+  <div class="kpi {% if n_segnalazioni > 0 %}warn{% endif %}">
+    <div class="etichetta">Segnalazioni aperte</div>
+    <div class="valore">{{ n_segnalazioni }}</div>
+  </div>
+</div>
+
+<div class="comune-layout">
+  <div class="panel">
+    <h2>Distretti</h2>
+    <div id="mini-mappa" style="height:340px;border-radius:10px;overflow:hidden"></div>
+  </div>
+  <div class="panel">
+    <h2>Distretti — {{ ultimo_mese or '' }}</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Codice</th><th>Nome</th><th class="num">Volume (m³)</th>
+              <th class="num">Reale %</th><th class="num">Prov. %</th><th class="num">Interp. %</th>
+              <th class="num">Utenze</th><th class="num">Segn.</th></tr>
+        </thead>
+        <tbody>
+          {% for d in righe_distretti %}
+          <tr data-codice="{{ d.codice }}" class="riga-distretto {% if d.codice == distretto_evidenziato %}distretto-evidenziato{% endif %}" style="cursor:pointer">
+            <td class="num">{{ d.codice }}</td>
+            <td>{{ d.nome }}{% if d.condiviso %} <span class="badge nodata" title="Distretto di un altro comune ufficiale, presente anche nei dati di {{ comune }}">condiviso</span>{% endif %}</td>
+            <td class="num">{{ "{:,.0f}".format(d.volume).replace(",", ".") }}</td>
+            <td class="num">{{ d.pct_reale }}</td>
+            <td class="num">{{ d.pct_provvisorio }}</td>
+            <td class="num">{{ d.pct_interpolato }}</td>
+            <td class="num">{{ d.utenze }}</td>
+            <td class="num">{{ d.n_segnalazioni }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Volumi mensili</h2>
+  <p class="nota-metodologica">
+    "Reale" = differenza fisica tra letture reali. "Provvisorio" = stima in attesa di una lettura
+    reale che la confermi (si aggiorna da sola). "Interpolato" = reset di contatore non marcato,
+    stimato dal ritmo storico: da verificare con Neta H2O.
+  </p>
+  <div class="filtri-grafico">
+    <label for="filtro-distretto">Distretto</label>
+    <select id="filtro-distretto"></select>
+  </div>
+  <div class="chart-wrap"><canvas id="chart-mensile"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Consumi per classe d'uso</h2>
+  <div class="chart-wrap piccolo"><canvas id="chart-classe"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Distretto × mese</h2>
+  <p class="nota-metodologica">Intensità = volume del mese rispetto al massimo del distretto. Bordo tratteggiato = più del 10% del mese è stima (provvisorio o interpolato); cella vuota = nessun dato.</p>
+  <div class="table-scroll"><table class="heatmap" id="heatmap"></table></div>
+</div>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const GEOJSON = {{ geojson | tojson }};
+  const ORIGINE = {{ origine_mensile | tojson }};
+  const CLASSE = {{ classe_uso | tojson }};
+  const DISTRETTI = {{ righe_distretti | tojson }};
+  const EVIDENZIATO = {{ distretto_evidenziato | tojson }};
+
+  // Stessa palette dell'app (style.css / pagina Grafici): reale/provvisorio/interpolato.
+  const TEAL_DARK = '#0A5C63', TEAL = '#0E7C86', GRIGIO = '#C3CFD6';
+  const COLORE_REALE = '#1C7C4C', COLORE_PROVVISORIO = '#B9700B', COLORE_INTERPOLATO = '#B3261E';
+  const COLORE_STATO = { consolidato: COLORE_REALE, provvisorio: COLORE_PROVVISORIO, interpolato: COLORE_INTERPOLATO };
+  const PALETTE_CATEGORICA = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+  const GRIGIO_ALTRO = '#8B9DA6';
+  const NON_DISTRETTI = ['NODMA', 'ND'];
+  const per = Object.fromEntries(DISTRETTI.map(d => [d.codice, d]));
+  const fmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
+
+  // ---- Selezione distretto condivisa tra mini-mappa, tabella e grafici ----
+  const selDistretto = document.getElementById('filtro-distretto');
+  const codici = [...new Set(ORIGINE.map(r => r['Codice Distretto']))];
+  const distretti = codici.filter(d => !NON_DISTRETTI.includes(d)).sort();
+  const nonDistretti = NON_DISTRETTI.filter(d => codici.includes(d));
+  selDistretto.innerHTML = '<option value="__tutti__">Tutti i distretti (somma)</option>' +
+    distretti.map(d => `<option value="${d}">${d}</option>`).join('') +
+    nonDistretti.map(d => `<option value="${d}">${d} (non distrettualizzato)</option>`).join('');
+
+  // ---- Mini-mappa ----
+  const mappa = L.map('mini-mappa');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(mappa);
+  let selezionato = EVIDENZIATO;
+  function stile(f) {
+    const cod = f.properties.codice_distretto, d = per[cod];
+    const sel = cod === selezionato;
+    return {
+      color: sel ? '#0F2438' : TEAL_DARK, weight: sel ? 3 : 1.5,
+      fillColor: d && d.stato ? COLORE_STATO[d.stato] : GRIGIO, fillOpacity: sel ? 0.8 : 0.5,
+    };
+  }
+  const strato = L.geoJSON(GEOJSON, {
+    style: stile,
+    onEachFeature: function (f, layer) {
+      const p = f.properties, d = per[p.codice_distretto];
+      layer.bindTooltip(`<strong style="font-family:'IBM Plex Mono',monospace">${p.codice_distretto}</strong><br>${p.nome_distretto}` +
+        (d ? `<br>${fmt(d.volume)} m³` : '<br>Nessun dato'), { sticky: true });
+      layer.on('click', () => seleziona(p.codice_distretto));
+    },
+  }).addTo(mappa);
+  if (GEOJSON.features.length) mappa.fitBounds(strato.getBounds(), { padding: [20, 20] });
+  else mappa.setView([45.15, 9.15], 11);
+
+  function seleziona(cod) {
+    selezionato = cod;
+    strato.setStyle(stile);
+    document.querySelectorAll('.riga-distretto').forEach(r =>
+      r.classList.toggle('distretto-evidenziato', r.dataset.codice === cod));
+    if (distretti.includes(cod) || nonDistretti.includes(cod)) selDistretto.value = cod;
+    aggiornaMensile(); aggiornaClasse();
+  }
+  document.querySelectorAll('.riga-distretto').forEach(r =>
+    r.addEventListener('click', () => seleziona(r.dataset.codice)));
+
+  // ---- Grafico mensile (stesso schema della pagina Grafici) ----
+  const mesi = [...new Set(ORIGINE.map(r => r.Mese))].sort();
+  function datiMensile(distretto) {
+    const righe = distretto === '__tutti__'
+      ? ORIGINE.filter(r => !NON_DISTRETTI.includes(r['Codice Distretto']))
+      : ORIGINE.filter(r => r['Codice Distretto'] === distretto);
+    const perMese = Object.fromEntries(mesi.map(m => [m, { reale: 0, provvisorio: 0, interpolato: 0 }]));
+    righe.forEach(r => {
+      perMese[r.Mese].reale += r['Reale (m3)'];
+      perMese[r.Mese].provvisorio += r['Provvisorio (m3)'];
+      perMese[r.Mese].interpolato += r['Interpolato (m3)'];
+    });
+    const arr = k => mesi.map(m => Math.round(perMese[m][k] * 100) / 100);
+    return { reale: arr('reale'), provvisorio: arr('provvisorio'), interpolato: arr('interpolato') };
+  }
+  const ds = (label, colore) => ({ label, data: [], backgroundColor: colore, borderColor: '#FFFFFF', borderWidth: 2, borderRadius: 4, maxBarThickness: 24, stack: 'volume' });
+  const chartMensile = new Chart(document.getElementById('chart-mensile').getContext('2d'), {
+    type: 'bar',
+    data: { labels: mesi, datasets: [ds('Reale', COLORE_REALE), ds('Provvisorio', COLORE_PROVVISORIO), ds('Interpolato', COLORE_INTERPOLATO)] },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, grid: { color: '#DCE4E9' }, ticks: { callback: v => v.toLocaleString('it-IT') } },
+      },
+      plugins: { legend: { position: 'top' } },
+    },
+  });
+  function aggiornaMensile() {
+    const d = datiMensile(selDistretto.value);
+    chartMensile.data.datasets[0].data = d.reale;
+    chartMensile.data.datasets[1].data = d.provvisorio;
+    chartMensile.data.datasets[2].data = d.interpolato;
+    chartMensile.update();
+  }
+
+  // ---- Classe d'uso ----
+  const chartClasse = new Chart(document.getElementById('chart-classe').getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderColor: '#FFFFFF', borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 12 } } } },
+  });
+  function aggiornaClasse() {
+    const dist = selDistretto.value;
+    const righe = dist === '__tutti__'
+      ? CLASSE.filter(r => !NON_DISTRETTI.includes(r['Codice Distretto']))
+      : CLASSE.filter(r => r['Codice Distretto'] === dist);
+    const perClasse = {};
+    righe.forEach(r => { perClasse[r["Classe d'uso"]] = (perClasse[r["Classe d'uso"]] || 0) + r['Volume Periodo Affidabile (m3)']; });
+    let voci = Object.entries(perClasse).sort((a, b) => b[1] - a[1]);
+    if (voci.length > 8) voci = [...voci.slice(0, 7), ['Altro', voci.slice(7).reduce((s, v) => s + v[1], 0)]];
+    chartClasse.data.labels = voci.map(v => v[0]);
+    chartClasse.data.datasets[0].data = voci.map(v => Math.round(v[1] * 100) / 100);
+    chartClasse.data.datasets[0].backgroundColor = voci.map((v, i) => v[0] === 'Altro' ? GRIGIO_ALTRO : PALETTE_CATEGORICA[i % PALETTE_CATEGORICA.length]);
+    chartClasse.update();
+  }
+  selDistretto.addEventListener('change', () => seleziona(selDistretto.value === '__tutti__' ? null : selDistretto.value));
+
+  // ---- Heatmap distretto × mese ----
+  (function () {
+    const tab = document.getElementById('heatmap');
+    const cella = {};
+    ORIGINE.forEach(r => {
+      const k = r['Codice Distretto'] + '|' + r.Mese;
+      const c = cella[k] || (cella[k] = { tot: 0, prov: 0 });
+      c.tot += r['Reale (m3)'] + r['Provvisorio (m3)'] + r['Interpolato (m3)'];
+      c.prov += r['Provvisorio (m3)'] + r['Interpolato (m3)'];
+    });
+    let html = '<thead><tr><th>Distretto</th>' + mesi.map(m => `<th>${m}</th>`).join('') + '</tr></thead><tbody>';
+    distretti.forEach(d => {
+      const max = Math.max(0, ...mesi.map(m => (cella[d + '|' + m] || { tot: 0 }).tot));
+      html += `<tr><td class="num">${d}</td>`;
+      mesi.forEach(m => {
+        const c = cella[d + '|' + m];
+        if (!c) { html += '<td></td>'; return; }
+        const t = max ? c.tot / max : 0;
+        const alpha = (0.1 + 0.8 * t).toFixed(2);
+        // Bordo tratteggiato solo se le stime pesano davvero (>10% del mese,
+        // stessa soglia del badge "Provvisorio"), non per pochi m³ isolati.
+        const pctStime = c.tot ? c.prov / c.tot * 100 : 0;
+        html += `<td class="${pctStime > 10 ? 'provv' : ''}" style="background:rgba(14,124,134,${alpha});color:${t > 0.55 ? '#fff' : '#152631'}" title="${d} ${m}: ${fmt(c.tot)} m³ — stime/interpolato ${pctStime.toFixed(1)}%">${fmt(c.tot)}</td>`;
+      });
+      html += '</tr>';
+    });
+    tab.innerHTML = html + '</tbody>';
+  })();
+
+  if (EVIDENZIATO && (distretti.includes(EVIDENZIATO) || nonDistretti.includes(EVIDENZIATO))) selDistretto.value = EVIDENZIATO;
+  aggiornaMensile();
+  aggiornaClasse();
+})();
+</script>
+<style>
+  .leaflet-tooltip, .leaflet-popup-content { font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 13px; color: #152631; }
+  .leaflet-container { font-family: 'IBM Plex Sans', system-ui, sans-serif; background: #F5F8FA; }
+</style>
+{% endblock %}

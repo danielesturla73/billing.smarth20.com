@@ -22,8 +22,36 @@
       <option value="segnalazioni">Segnalazioni aperte</option>
     </select>
   </div>
-  <div id="mappa" style="height:560px;border-radius:10px;overflow:hidden"></div>
-  <div id="legenda" style="display:flex;gap:18px;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-2)"></div>
+  <div class="mappa-layout">
+    <div>
+      <div id="mappa" style="height:560px;border-radius:10px;overflow:hidden"></div>
+      <div id="legenda" style="display:flex;gap:18px;align-items:center;margin-top:12px;font-size:12.5px;color:var(--text-2)"></div>
+    </div>
+    <div class="table-scroll">
+      <table id="tabella-comuni">
+        <thead>
+          <tr><th>Comune</th><th class="num">Distretti</th><th class="num">Ultimo mese</th>
+              <th class="num">Volume (m³)</th><th>Dati</th><th class="num">Segn.</th></tr>
+        </thead>
+        <tbody>
+          {% for c in comuni_tabella %}
+          <tr class="riga-comune" data-comune="{{ c.comune }}" style="cursor:pointer">
+            <td><a href="/pagine/comune/{{ c.comune | urlencode }}">{{ c.comune }}</a></td>
+            <td class="num">{{ c.n_distretti }}</td>
+            <td class="num">{{ c.mese or '—' }}</td>
+            <td class="num">{{ "{:,.0f}".format(c.volume).replace(",", ".") if c.volume is not none else '—' }}</td>
+            <td>{% if c.stato == 'consolidato' %}<span class="badge real">Consolidato</span>
+                {% elif c.stato == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
+                {% elif c.stato == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Interpolato</span>
+                {% else %}<span class="badge nodata">Nessun dato</span>{% endif %}</td>
+            <td class="num">{{ c.n_segnalazioni }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="nota-metodologica" style="margin-top:10px">Clic su un distretto o su un comune per aprire la pagina del comune.</p>
+    </div>
+  </div>
 </div>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
@@ -32,6 +60,8 @@
 (function () {
   const GEOJSON = {{ geojson_demo | tojson }};
   const DATI = {{ dati_tematici | tojson }};
+  const normalizza = t => (t || '').trim().toUpperCase();
+  const COMUNI_CARICATI = new Set({{ comuni_tabella | map(attribute='comune') | list | tojson }}.map(normalizza));
 
   // Palette WMS SmartH2O (le stesse variabili di style.css, ripetute qui
   // in esadecimale perche' Leaflet disegna su <canvas>/SVG e non legge le
@@ -130,8 +160,17 @@
       const p = feature.properties;
       const v = DATI[p.codice_distretto];
       const etichetta = () => `<strong style="font-family:'IBM Plex Mono',monospace">${p.codice_distretto}</strong><br>${p.nome_distretto}<br>${testoInfo(v)}`;
-      layer.bindTooltip(etichetta, { sticky: true, className: 'tooltip-distretto' });
-      layer.bindPopup(etichetta);
+      const comune = (v && v.comune) || p.comune || '';
+      const caricato = COMUNI_CARICATI.has(normalizza(comune));
+      const suffisso = caricato
+        ? '<br><em style="color:#57707B">Clic per aprire la pagina del comune</em>'
+        : '<br><em style="color:#8B9DA6">Comune non ancora caricato</em>';
+      layer.bindTooltip(() => etichetta() + suffisso, { sticky: true, className: 'tooltip-distretto' });
+      if (caricato) {
+        layer.on('click', function () {
+          window.location.href = `/pagine/comune/${encodeURIComponent(comune)}?distretto=${encodeURIComponent(p.codice_distretto)}`;
+        });
+      }
       layer.on('mouseover', function () {
         layer.setStyle({ fillOpacity: 0.8, weight: 2.5 });
       });
@@ -154,6 +193,19 @@
     aggiornaLegenda();
   });
   aggiornaLegenda();
+
+  // Clic su una riga della tabella (fuori dal link): zoom sui distretti di quel comune.
+  document.querySelectorAll('.riga-comune').forEach(function (riga) {
+    riga.addEventListener('click', function (e) {
+      if (e.target.tagName === 'A') return;
+      const c = normalizza(riga.dataset.comune);
+      const gruppo = L.featureGroup(strato.getLayers().filter(l => {
+        const p = l.feature.properties, v = DATI[p.codice_distretto];
+        return normalizza((v && v.comune) || p.comune) === c;
+      }));
+      if (gruppo.getLayers().length) mappa.fitBounds(gruppo.getBounds(), { padding: [30, 30] });
+    });
+  });
 
   if (GEOJSON.features.length) {
     mappa.fitBounds(strato.getBounds(), { padding: [24, 24] });

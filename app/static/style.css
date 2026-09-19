@@ -361,3 +361,32 @@ footer {
   font-size: 12px;
   padding: 24px;
 }
+
+
+/* Home/mappa: mappa a sinistra, tabella dei comuni a destra (in colonna su schermi stretti). */
+.mappa-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .mappa-layout { grid-template-columns: 1fr; }
+}
+.riga-comune:hover { background: var(--teal-light); }
+
+/* Pagina comune */
+.comune-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .comune-layout { grid-template-columns: 1fr; }
+}
+tr.distretto-evidenziato { background: var(--teal-light); }
+tr.distretto-evidenziato td:first-child { box-shadow: inset 3px 0 0 var(--teal); }
+table.heatmap th { text-align: center; }
+table.heatmap td { text-align: center; font-family: var(--mono); font-size: 11px; padding: 6px 4px; min-width: 52px; }
+table.heatmap td.provv { outline: 1.5px dashed var(--amber); outline-offset: -3px; }

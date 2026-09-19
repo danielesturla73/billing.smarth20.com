@@ -29,7 +29,9 @@ import json
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from urllib.parse import quote
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -72,9 +74,9 @@ def health_check():
 
 @app.get("/")
 def root():
-    """Ora che esiste una pagina vera (/pagine/riepilogo), la radice ci
-    rimanda direttamente invece di mostrare un JSON di stato."""
-    return RedirectResponse(url="/pagine/riepilogo")
+    """L'app si apre sulla mappa dei distretti (richiesto da Daniele il
+    19/09/2026): da li' si entra nella pagina del comune con un clic."""
+    return RedirectResponse(url="/pagine/mappa")
 
 
 @app.post("/upload")
@@ -894,12 +896,56 @@ def _geojson_per_mappa() -> tuple[dict, bool]:
     """
     if motore_calcolo.PERCORSO_CONFINI_DISTRETTI.exists():
         dati = json.loads(motore_calcolo.PERCORSO_CONFINI_DISTRETTI.read_text(encoding="utf-8"))
-        nomi = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")["nome_distretto"]
+        df_elenco = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")
         for feature in dati.get("features", []):
             codice = feature.get("properties", {}).get("codice_distretto", "")
-            feature["properties"]["nome_distretto"] = nomi.get(codice) or codice
+            feature["properties"]["nome_distretto"] = df_elenco["nome_distretto"].get(codice) or codice
+            # Il comune serve alla mappa per aprire la pagina giusta al clic.
+            feature["properties"]["comune"] = df_elenco["comune_ufficiale"].get(codice, "")
         return dati, True
     return _geojson_dimostrativo(), False
+
+
+# NODMA (case sparse) e ND (distretto anomalo/mancante) non sono distretti
+# veri: restano fuori dai totali per distretto, come in Import_WMS.
+NON_DISTRETTI = ("NODMA", "ND")
+
+
+def _stato_dato(pct_provvisorio, pct_interpolato) -> str:
+    """Stessa regola di colore del tema "Affidabilita'" della mappa
+    (mappa.html): interpolato > provvisorio (oltre il 10%) > consolidato."""
+    if pct_interpolato and pct_interpolato > 0:
+        return "interpolato"
+    if pct_provvisorio and pct_provvisorio > 10:
+        return "provvisorio"
+    return "consolidato"
+
+
+def _righe_comuni_mappa(dati: dict, comuni: list[str]) -> list[dict]:
+    """Tabella dei comuni in archivio per la home (una riga per comune),
+    ricavata da _dati_tematici_mappa senza altri ricalcoli. Il volume e'
+    la somma dei distretti sull'ultimo mese del comune."""
+    righe = []
+    for comune in comuni:
+        distretti = {
+            c: v for c, v in dati.items()
+            if v["comune"] == comune and c not in NON_DISTRETTI
+        }
+        con_dati = {c: v for c, v in distretti.items() if v["mese"]}
+        mese = max((v["mese"] for v in con_dati.values()), default=None)
+        ultimi = [v for v in con_dati.values() if v["mese"] == mese]
+        volume = sum(v["volume"] for v in ultimi)
+        prov = sum(v["volume"] * v["pct_provvisorio"] / 100 for v in ultimi)
+        interp = sum(v["volume"] * v["pct_interpolato"] / 100 for v in ultimi)
+        righe.append({
+            "comune": comune,
+            "n_distretti": len(distretti),
+            "mese": mese,
+            "volume": round(volume, 2) if mese else None,
+            "stato": _stato_dato(prov / volume * 100 if volume else 0, interp / volume * 100 if volume else 0) if mese else None,
+            "n_segnalazioni": sum(v["n_segnalazioni"] for v in distretti.values()),
+        })
+    return righe
 
 
 @app.get("/pagine/mappa")
@@ -912,12 +958,131 @@ def pagina_mappa(request: Request):
     due casi, stessa struttura Feature/properties attesa dal template.
     """
     geojson, confini_veri = _geojson_per_mappa()
+    comuni_disponibili = _comuni_disponibili()
+    dati_tematici = _dati_tematici_mappa()
     return templates.TemplateResponse(request, "mappa.html", {
         "request": request,
         "pagina_attiva": "mappa",
-        "comuni_disponibili": _comuni_disponibili(),
+        "comuni_disponibili": comuni_disponibili,
         "comune_selezionato": None,
         "geojson_demo": geojson,
         "confini_veri": confini_veri,
-        "dati_tematici": _dati_tematici_mappa(),
+        "dati_tematici": dati_tematici,
+        "comuni_tabella": _righe_comuni_mappa(dati_tematici, comuni_disponibili),
+    })
+
+
+@app.get("/pagine/comune/{comune}")
+def pagina_comune(request: Request, comune: str, distretto: str | None = None, cambia_comune: str | None = Query(None, alias="comune")):
+    """Pagina di un comune, aperta con un clic su un suo distretto dalla
+    mappa (richiesta da Daniele il 19/09/2026): KPI, mini-mappa dei
+    distretti del comune, grafici e tabella per distretto. Il distretto
+    cliccato (?distretto=) risulta evidenziato e preselezionato nei
+    grafici. Un distretto il cui comune ufficiale (distretti_comuni.csv) e'
+    un altro ma che compare nei dati di questo comune (es. DBRN01, Broni e
+    Stradella) e' segnato "condiviso".
+
+    Il filtro Comune nell'header invia il form a questa stessa pagina con
+    ?comune=...: se e' diverso dal comune nell'URL si va a quello scelto
+    ("Tutti" torna alla mappa), altrimenti il filtro non avrebbe effetto.
+    """
+    if cambia_comune is not None and cambia_comune.strip().upper() != comune.strip().upper():
+        if not cambia_comune.strip():
+            return RedirectResponse(url="/pagine/mappa", status_code=303)
+        return RedirectResponse(url=f"/pagine/comune/{quote(cambia_comune.strip())}", status_code=303)
+
+    trovati = list(_risultati_per_comune(comune))
+    if not trovati:
+        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+    comune_trovato, risultato = trovati[0]
+
+    elenco = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")
+    origine = risultato.volumi_distretto_mese_origine
+    origine_valida = origine[~origine["Codice Distretto"].isin(NON_DISTRETTI)]
+    ultimo_mese = str(origine_valida["Mese"].max()) if not origine_valida.empty else None
+
+    segnalazioni = pd.concat([
+        risultato.anomalie_metodo_b[["DISTRETTO"]].rename(columns={"DISTRETTO": "Codice Distretto"}),
+        risultato.cessate_con_stima_finale[["Distretto"]].rename(columns={"Distretto": "Codice Distretto"}),
+    ], ignore_index=True)["Codice Distretto"].value_counts()
+    utenze = risultato.utenze_per_distretto.set_index("Codice Distretto")["Totale Utenze"]
+
+    righe_distretti = []
+    codici = sorted(set(origine_valida["Codice Distretto"]) | set(utenze.index) - set(NON_DISTRETTI))
+    for codice in codici:
+        r = origine_valida[(origine_valida["Codice Distretto"] == codice) & (origine_valida["Mese"].astype(str) == ultimo_mese)]
+        reale, prov, interp = (float(r[c].sum()) for c in ("Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"))
+        totale = reale + prov + interp
+        pct_prov = prov / totale * 100 if totale else 0
+        pct_interp = interp / totale * 100 if totale else 0
+        comune_ufficiale = elenco["comune_ufficiale"].get(codice, "")
+        righe_distretti.append({
+            "codice": codice,
+            "nome": elenco["nome_distretto"].get(codice) or codice,
+            "volume": round(totale, 2),
+            "pct_reale": round(reale / totale * 100, 1) if totale else 0,
+            "pct_provvisorio": round(pct_prov, 1),
+            "pct_interpolato": round(pct_interp, 1),
+            "stato": _stato_dato(pct_prov, pct_interp) if totale else None,
+            "utenze": int(utenze.get(codice, 0)),
+            "n_segnalazioni": int(segnalazioni.get(codice, 0)),
+            "condiviso": bool(comune_ufficiale) and comune_ufficiale != comune_trovato,
+        })
+
+    # KPI: ultimo mese, ultimo trimestre, variazione sullo stesso mese
+    # dell'anno prima (solo se presente in archivio), utenze e segnalazioni.
+    volume_mese = sum(d["volume"] for d in righe_distretti)
+    variazione = None
+    if ultimo_mese:
+        mese_prec = f"{int(ultimo_mese[:4]) - 1}{ultimo_mese[4:]}"
+        prec = origine_valida[origine_valida["Mese"].astype(str) == mese_prec]
+        vol_prec = float(prec[["Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"]].sum().sum())
+        if vol_prec:
+            variazione = round((volume_mese - vol_prec) / vol_prec * 100, 1)
+    # Solo trimestri completi: l'ultimo puo' contenere un mese solo (parziale).
+    trimestri = risultato.volumi_distretto_trimestre
+    trimestri = trimestri[trimestri["Completo"] == "Sì"]
+    trimestre_kpi = None
+    if not trimestri.empty:
+        ultimo_trim = trimestri["Trimestre"].max()
+        t = trimestri[trimestri["Trimestre"] == ultimo_trim]
+        trimestre_kpi = {
+            "trimestre": ultimo_trim,
+            "volume": round(float(t["Volume Fatturato (m3)"].sum()), 2),
+            "provvisorio": bool((t["Contiene Stime Provvisorie"] == "Sì").any()),
+        }
+
+    # Mini-mappa: solo i distretti di questo comune (elenco ufficiale + quelli
+    # presenti nei suoi dati, anche se condivisi).
+    geojson, _ = _geojson_per_mappa()
+    codici_comune = set(codici) | set(elenco.index[elenco["comune_ufficiale"] == comune_trovato])
+    geojson["features"] = [
+        f for f in geojson.get("features", [])
+        if f["properties"].get("codice_distretto") in codici_comune
+    ]
+
+    mesi_disponibili = sorted(str(m) for m in risultato.volumi_utenza_mese["Mese"].unique())
+    return templates.TemplateResponse(request, "comune.html", {
+        "request": request,
+        "pagina_attiva": "mappa",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": comune_trovato,
+        "comune": comune_trovato,
+        "distretto_evidenziato": distretto.strip().upper() if distretto else None,
+        "ultimo_mese": ultimo_mese,
+        "stato_comune": _stato_dato(
+            sum(d["volume"] * d["pct_provvisorio"] / 100 for d in righe_distretti) / volume_mese * 100 if volume_mese else 0,
+            sum(d["volume"] * d["pct_interpolato"] / 100 for d in righe_distretti) / volume_mese * 100 if volume_mese else 0,
+        ) if volume_mese else None,
+        "volume_mese": round(volume_mese, 2),
+        "variazione": variazione,
+        "trimestre_kpi": trimestre_kpi,
+        "utenze_totali": sum(d["utenze"] for d in righe_distretti),
+        "n_segnalazioni": sum(d["n_segnalazioni"] for d in righe_distretti),
+        "righe_distretti": righe_distretti,
+        "geojson": geojson,
+        "origine_mensile": _tabella_json(origine),
+        "classe_uso": _tabella_json(risultato.statistiche_classe_uso),
+        "stato_chiusura": _tabella_json(risultato.stato_chiusura_mesi),
+        "mesi_disponibili": mesi_disponibili,
     })
