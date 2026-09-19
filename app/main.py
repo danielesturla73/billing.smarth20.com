@@ -26,6 +26,7 @@ cambia la logica. La persistenza (SQLite) e' in database.py.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -140,6 +141,7 @@ async def upload_estrazioni(files: list[UploadFile] = File(...)):
     archivi_aggiornati = []
     for comune, percorsi in file_per_comune.items():
         _, stats = database.aggiorna_letture(percorsi, comune)
+        _invalida_comune(comune)
         archivi_aggiornati.append({"comune": comune, **stats})
 
     return {"file": risultati_file, "archivi_aggiornati": archivi_aggiornati}
@@ -246,11 +248,75 @@ def _anomalie_per_utenza(risultato, codice_servizio: int) -> list[str]:
     return frasi
 
 
+# Cache dei risultati del Metodo B per comune (aggiunta il 19/09/2026 dopo
+# che le pagine impiegavano 2-6 secondi: ogni richiesta ricalcolava
+# elabora_dataframe su tutto l'archivio, ~1,7s Belgioioso, ~3,3s Mortara).
+# Invalidazione (concordata con Daniele il 19/09/2026):
+# - upload di un'estrazione: solo il comune caricato (_invalida_comune),
+#   ricalcolato subito in background; gli altri comuni restano in cache;
+# - elenco distretti (importa_mappa_distretti cambia la classificazione di
+#   TUTTI i comuni): si controlla la data del file e si svuota tutto.
+# Conseguenza accettata: modifiche al database fatte fuori dall'upload
+# (scripts/migra_csv_a_sqlite.py, a mano) NON si vedono finche' non si
+# riavvia il container. I risultati in cache sono condivisi tra richieste:
+# vanno solo LETTI, mai modificati sul posto (le pagine ne ricavano copie,
+# es. _tabella_json).
+_CACHE_RISULTATI: dict[str, object] = {}
+_CACHE_VERSIONE: list = [None]
+_LOCK_CACHE = threading.Lock()
+_LOCK_PER_COMUNE: dict[str, threading.Lock] = {}
+
+
+def _chiave_comune(comune: str) -> str:
+    return comune.strip().upper()
+
+
+def _versione_elenco_distretti():
+    try:
+        st = motore_calcolo.PERCORSO_MAPPA_DISTRETTI.stat()
+    except FileNotFoundError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _risultato_in_cache(conn, comune: str):
+    """Lock globale solo per leggere/scrivere il dizionario (istantaneo);
+    il calcolo (secondi) e' sotto un lock PER COMUNE, cosi' un ricalcolo in
+    corso non blocca chi legge un altro comune gia' in cache."""
+    versione = _versione_elenco_distretti()
+    chiave = _chiave_comune(comune)
+    with _LOCK_CACHE:
+        if _CACHE_VERSIONE[0] != versione:
+            _CACHE_RISULTATI.clear()
+            _CACHE_VERSIONE[0] = versione
+        if chiave in _CACHE_RISULTATI:
+            return _CACHE_RISULTATI[chiave]
+        lock_comune = _LOCK_PER_COMUNE.setdefault(chiave, threading.Lock())
+    with lock_comune:
+        with _LOCK_CACHE:
+            if chiave in _CACHE_RISULTATI:  # calcolato da un'altra richiesta nel frattempo
+                return _CACHE_RISULTATI[chiave]
+        df = database.carica_letture(conn, comune)
+        risultato = None if df.empty else motore_calcolo.elabora_dataframe(df)
+        with _LOCK_CACHE:
+            _CACHE_RISULTATI[chiave] = risultato
+        return risultato
+
+
+def _invalida_comune(comune: str) -> None:
+    """Toglie dalla cache il comune appena aggiornato da un upload e lo
+    ricalcola in background, cosi' chi apre la pagina lo trova pronto."""
+    with _LOCK_CACHE:
+        _CACHE_RISULTATI.pop(_chiave_comune(comune), None)
+    threading.Thread(target=lambda: list(_risultati_per_comune(comune)), daemon=True).start()
+
+
 def _risultati_per_comune(comune_filtro: str | None):
-    """Ricalcola il Metodo B sull'archivio storico (SQLite) di ogni
-    comune, uno alla volta (mai comuni diversi insieme: vedi /riepilogo
-    per il perché), e restituisce (comune, risultato) per ognuno. Usato
-    sia da /riepilogo sia da /diagnostica, per non duplicare la stessa
+    """Metodo B sull'archivio storico (SQLite) di ogni comune, uno alla
+    volta (mai comuni diversi insieme: vedi /riepilogo per il perche'),
+    restituisce (comune, risultato) per ognuno. Il calcolo e' in cache
+    (vedi _risultato_in_cache): si rifa' solo quando l'archivio cambia.
+    Usato da tutte le pagine/endpoint, per non duplicare la stessa
     selezione dei comuni noti al database.
     """
     with database.connessione() as conn:
@@ -258,10 +324,16 @@ def _risultati_per_comune(comune_filtro: str | None):
         if comune_filtro:
             comuni = [c for c in comuni if c.strip().upper() == comune_filtro.strip().upper()]
         for comune in comuni:
-            df = database.carica_letture(conn, comune)
-            if df.empty:
-                continue
-            yield comune, motore_calcolo.elabora_dataframe(df)
+            risultato = _risultato_in_cache(conn, comune)
+            if risultato is not None:
+                yield comune, risultato
+
+
+@app.on_event("startup")
+def _precalcola_risultati():
+    """Scalda la cache in background all'avvio, cosi' anche la prima
+    visita dopo un riavvio/deploy e' veloce (non blocca l'avvio)."""
+    threading.Thread(target=lambda: list(_risultati_per_comune(None)), daemon=True).start()
 
 
 @app.get("/riepilogo")
