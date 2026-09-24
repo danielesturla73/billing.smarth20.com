@@ -2,7 +2,8 @@
 {% block titolo %}{{ comune }} — Analisi Consumi da Fatturazione{% endblock %}
 {% block contenuto %}
 <h1>{{ comune }}
-  {% if stato_comune == 'consolidato' %}<span class="badge real">Consolidato</span>
+  {% if stato_comune == 'incompleto' %}<span class="badge nodata" title="Volume dell'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Ultimo mese incompleto</span>
+  {% elif stato_comune == 'consolidato' %}<span class="badge real">Consolidato</span>
   {% elif stato_comune == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
   {% elif stato_comune == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Contiene interpolato</span>
   {% endif %}
@@ -10,7 +11,6 @@
 <p class="nota-metodologica">
   Ultimo mese in archivio: <strong>{{ ultimo_mese or '—' }}</strong> ·
   <a href="/pagine/mappa">← torna alla mappa</a> ·
-  <a href="/pagine/grafici?comune={{ comune | urlencode }}">Top consumatori</a> ·
   <a href="/pagine/diagnostica?comune={{ comune | urlencode }}">Segnalazioni</a> ·
   <a href="/pagine/riepilogo?comune={{ comune | urlencode }}">Riepilogo</a>
 </p>
@@ -19,6 +19,7 @@
   <div class="kpi">
     <div class="etichetta">Volume {{ ultimo_mese or '' }}</div>
     <div class="valore">{{ "{:,.0f}".format(volume_mese).replace(",", ".") }} m³</div>
+    <div class="sotto-valore" title="Portata media continua equivalente: m³ × 1000 ÷ (giorni × 86.400)">≈ {{ ls_mese | it_num(2) }} l/s <span>medi su {{ giorni_mese }} giorni</span></div>
   </div>
   <div class="kpi">
     <div class="etichetta">Vs stesso mese anno prima</div>
@@ -27,6 +28,7 @@
   <div class="kpi {% if trimestre_kpi and trimestre_kpi.provvisorio %}warn{% endif %}">
     <div class="etichetta">Ultimo trimestre {{ trimestre_kpi.trimestre if trimestre_kpi else '' }}{% if trimestre_kpi and trimestre_kpi.provvisorio %} (con stime){% endif %}</div>
     <div class="valore">{% if trimestre_kpi %}{{ "{:,.0f}".format(trimestre_kpi.volume).replace(",", ".") }} m³{% else %}—{% endif %}</div>
+    {% if trimestre_kpi %}<div class="sotto-valore">≈ {{ ls_trimestre | it_num(2) }} l/s <span>medi</span></div>{% endif %}
   </div>
   <div class="kpi">
     <div class="etichetta">Utenze</div>
@@ -48,7 +50,7 @@
     <div class="table-scroll">
       <table>
         <thead>
-          <tr><th>Codice</th><th>Nome</th><th class="num">Volume (m³)</th>
+          <tr><th>Codice</th><th>Nome</th><th class="num">Volume (m³)</th><th class="num" title="Portata media equivalente sul mese">l/s medi</th>
               <th class="num">Reale %</th><th class="num">Prov. %</th><th class="num">Interp. %</th>
               <th class="num">Utenze</th><th class="num">Segn.</th></tr>
         </thead>
@@ -58,6 +60,7 @@
             <td class="num">{{ d.codice }}</td>
             <td>{{ d.nome }}{% if d.condiviso %} <span class="badge nodata" title="Distretto di un altro comune ufficiale, presente anche nei dati di {{ comune }}">condiviso</span>{% endif %}</td>
             <td class="num">{{ "{:,.0f}".format(d.volume).replace(",", ".") }}</td>
+            <td class="num">{{ d.ls | it_num(2) }}</td>
             <td class="num">{{ d.pct_reale }}</td>
             <td class="num">{{ d.pct_provvisorio }}</td>
             <td class="num">{{ d.pct_interpolato }}</td>
@@ -65,9 +68,23 @@
             <td class="num">{{ d.n_segnalazioni }}</td>
           </tr>
           {% endfor %}
+          {% for d in righe_fuori_distretto %}
+          <tr class="riga-fuori-distretto">
+            <td class="num">{{ d.codice }}</td>
+            <td>{{ d.nome }}</td>
+            <td class="num">{{ "{:,.0f}".format(d.volume).replace(",", ".") }}</td>
+            <td class="num">{{ d.ls | it_num(2) }}</td>
+            <td class="num">{{ d.pct_reale }}</td>
+            <td class="num">{{ d.pct_provvisorio }}</td>
+            <td class="num">{{ d.pct_interpolato }}</td>
+            <td class="num">{{ d.utenze }}</td>
+            <td class="num">—</td>
+          </tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
+    {% if righe_fuori_distretto %}<p class="nota-metodologica">NODMA = utenze fuori distretto · ND = distretto non indicato (vuoto o "*"). Non entrano nei totali del comune.</p>{% endif %}
   </div>
 </div>
 
@@ -106,15 +123,23 @@
   const CLASSE = {{ classe_uso | tojson }};
   const DISTRETTI = {{ righe_distretti | tojson }};
   const EVIDENZIATO = {{ distretto_evidenziato | tojson }};
+  const INCOMPLETI = {{ mesi_incompleti | tojson }};
 
   // Stessa palette dell'app (style.css / pagina Grafici): reale/provvisorio/interpolato.
   const TEAL_DARK = '#0A5C63', TEAL = '#0E7C86', GRIGIO = '#C3CFD6';
   const COLORE_REALE = '#1C7C4C', COLORE_PROVVISORIO = '#B9700B', COLORE_INTERPOLATO = '#B3261E';
-  const COLORE_STATO = { consolidato: COLORE_REALE, provvisorio: COLORE_PROVVISORIO, interpolato: COLORE_INTERPOLATO };
+  // Colori della mini-mappa: servono SOLO a distinguere i distretti tra loro
+  // (richiesto da Daniele il 21/09/2026), non a dare uno stato — quello sta nel
+  // badge in alto. Palette categorica dell'app + 2 colori extra (Stradella ha
+  // 10 distretti), assegnati per codice in ordine fisso, cosi' un distretto
+  // ha sempre lo stesso colore in mappa e in tabella.
+  const COLORI_DISTRETTI = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948', '#2fb8d4', '#8c5a2b'];
   const PALETTE_CATEGORICA = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
   const GRIGIO_ALTRO = '#8B9DA6';
   const NON_DISTRETTI = ['NODMA', 'ND'];
   const per = Object.fromEntries(DISTRETTI.map(d => [d.codice, d]));
+  const codiciMappa = [...new Set([...DISTRETTI.map(d => d.codice), ...GEOJSON.features.map(f => f.properties.codice_distretto)])].sort();
+  const coloreDistretto = cod => COLORI_DISTRETTI[codiciMappa.indexOf(cod) % COLORI_DISTRETTI.length];
   const fmt = n => n.toLocaleString('it-IT', { maximumFractionDigits: 0 });
 
   // ---- Selezione distretto condivisa tra mini-mappa, tabella e grafici ----
@@ -127,7 +152,13 @@
     nonDistretti.map(d => `<option value="${d}">${d} (non distrettualizzato)</option>`).join('');
 
   // ---- Mini-mappa ----
-  const mappa = L.map('mini-mappa');
+  // Mappa bloccata (richiesto da Daniele il 21/09/2026): con la rotella del mouse
+  // si cambiava lo zoom senza volerlo scorrendo la pagina. Restano attivi solo
+  // i clic sui distretti; l'inquadratura e' quella di fitBounds.
+  const mappa = L.map('mini-mappa', {
+    zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false,
+    boxZoom: false, keyboard: false, dragging: false, zoomSnap: 0.25,
+  });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(mappa);
   let selezionato = EVIDENZIATO;
   function stile(f) {
@@ -135,7 +166,7 @@
     const sel = cod === selezionato;
     return {
       color: sel ? '#0F2438' : TEAL_DARK, weight: sel ? 3 : 1.5,
-      fillColor: d && d.stato ? COLORE_STATO[d.stato] : GRIGIO, fillOpacity: sel ? 0.8 : 0.5,
+      fillColor: coloreDistretto(cod), fillOpacity: sel ? 0.85 : 0.6,
     };
   }
   const strato = L.geoJSON(GEOJSON, {
@@ -158,8 +189,12 @@
     if (distretti.includes(cod) || nonDistretti.includes(cod)) selDistretto.value = cod;
     aggiornaMensile(); aggiornaClasse();
   }
-  document.querySelectorAll('.riga-distretto').forEach(r =>
-    r.addEventListener('click', () => seleziona(r.dataset.codice)));
+  document.querySelectorAll('.riga-distretto').forEach(r => {
+    r.addEventListener('click', () => seleziona(r.dataset.codice));
+    const cella = r.querySelector('td');
+    cella.insertAdjacentHTML('afterbegin',
+      `<span style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:${coloreDistretto(r.dataset.codice)}"></span>`);
+  });
 
   // ---- Grafico mensile (stesso schema della pagina Grafici) ----
   const mesi = [...new Set(ORIGINE.map(r => r.Mese))].sort();
@@ -176,7 +211,7 @@
     const arr = k => mesi.map(m => Math.round(perMese[m][k] * 100) / 100);
     return { reale: arr('reale'), provvisorio: arr('provvisorio'), interpolato: arr('interpolato') };
   }
-  const ds = (label, colore) => ({ label, data: [], backgroundColor: colore, borderColor: '#FFFFFF', borderWidth: 2, borderRadius: 4, maxBarThickness: 24, stack: 'volume' });
+  const ds = (label, colore) => ({ label, data: [], backgroundColor: ctx => INCOMPLETI.includes(ctx.chart.data.labels[ctx.dataIndex]) ? colore + '55' : colore, borderColor: '#FFFFFF', borderWidth: 2, borderRadius: 4, maxBarThickness: 24, stack: 'volume' });
   const chartMensile = new Chart(document.getElementById('chart-mensile').getContext('2d'), {
     type: 'bar',
     data: { labels: mesi, datasets: [ds('Reale', COLORE_REALE), ds('Provvisorio', COLORE_PROVVISORIO), ds('Interpolato', COLORE_INTERPOLATO)] },
@@ -186,7 +221,15 @@
         x: { stacked: true, grid: { display: false } },
         y: { stacked: true, beginAtZero: true, grid: { color: '#DCE4E9' }, ticks: { callback: v => v.toLocaleString('it-IT') } },
       },
-      plugins: { legend: { position: 'top' } },
+      plugins: { legend: { position: 'top' }, tooltip: { callbacks: {
+        title: it => INCOMPLETI.includes(it[0].label) ? it[0].label + ' — mese incompleto' : it[0].label,
+        footer: it => {  // totale del mese e portata media equivalente in l/s
+          const tot = it.reduce((s, x) => s + x.parsed.y, 0);
+          const [a, m] = it[0].label.split('-').map(Number);
+          const ls = tot * 1000 / (new Date(a, m, 0).getDate() * 86400);
+          return `Totale ${fmt(tot)} m³ ≈ ${ls.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} l/s`;
+        },
+      } } },
     },
   });
   function aggiornaMensile() {

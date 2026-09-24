@@ -105,6 +105,10 @@ nav.tabs a.attivo {
 
 nav.tabs a:hover { color: var(--teal-dark); }
 
+/* Home (mappa): prima tab a sinistra, con la casetta. */
+nav.tabs a.tab-home { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-dark); }
+nav.tabs a.tab-home svg { flex: none; }
+
 main {
   max-width: 1500px;
   margin: 0 auto;
@@ -366,10 +370,15 @@ footer {
 /* Home/mappa: mappa a sinistra, tabella dei comuni a destra (in colonna su schermi stretti). */
 .mappa-layout {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   gap: 18px;
   align-items: start;
 }
+/* Tabella comuni della home: compatta e senza a capo, cosi' entrano tutte
+   le colonne (compresa "Segn.") senza scorrere a destra. */
+#tabella-comuni { font-size: 12px; }
+#tabella-comuni th, #tabella-comuni td { padding: 6px 6px; white-space: nowrap; }
+#tabella-comuni .badge { font-size: 10.5px; padding: 2px 6px; }
 @media (max-width: 900px) {
   .mappa-layout { grid-template-columns: 1fr; }
 }
@@ -403,6 +412,10 @@ table.heatmap td.provv { outline: 1.5px dashed var(--amber); outline-offset: -3p
 .campo input, .campo select, .form-riga select { border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 10px; font: inherit; background: #fff; }
 .box-accesso .campo { margin-bottom: 12px; }
 .box-accesso .campo input { width: 100%; }
+.badge-prototipo { display: inline-block; font-size: 11px; color: var(--amber); background: var(--amber-bg); border: 1px solid rgba(185,112,11,.3); border-radius: 10px; padding: 2px 10px; margin-bottom: 10px; }
+.disclaimer-accesso { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 11px; line-height: 1.55; color: var(--text-muted); }
+.disclaimer-accesso p { margin: 0 0 8px; }
+.disclaimer-accesso p:last-child { margin-bottom: 0; }
 .btn-primario { background: var(--teal); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font: inherit; }
 .btn-primario:hover { background: var(--teal-dark); }
 .btn-link { background: none; border: none; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; color: var(--teal); }
@@ -412,3 +425,20 @@ table.heatmap td.provv { outline: 1.5px dashed var(--amber); outline-offset: -3p
 .sotto-tab a.attivo { font-weight: 600; text-decoration: none; color: var(--text); }
 td form.inline { display: inline-flex; gap: 6px; align-items: center; margin: 0 6px 0 0; }
 td form.inline input[type=password] { width: 130px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 6px; }
+
+
+/* Panoramica: griglia di mini-grafici, uno per comune. */
+.griglia-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.mini-comune { display: block; text-decoration: none; color: inherit; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px 4px; background: var(--surface); }
+.mini-comune:hover { background: var(--teal-light); }
+.mini-comune .nome { font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; gap: 6px; }
+.mini-comune .nome span { font-family: var(--mono); font-weight: 500; color: var(--text-2); }
+.mini-comune .mini-wrap { height: 70px; position: relative; }
+.kpi-grid.compatto { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+
+/* Menu: separatore sottile tra i gruppi di tab. */
+nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--border-strong); margin: 0 8px; }
+
+/* Portata media equivalente (l/s) sotto il valore dei KPI. */
+.kpi .sotto-valore { font-family: var(--mono); font-size: 13px; color: var(--teal-dark); margin-top: 4px; }
+.kpi .sotto-valore span { font-family: var(--font); font-size: 11px; color: var(--text-2); }

@@ -12,6 +12,9 @@
   <header>
     <div class="titolo">Analisi Consumi da Fatturazione</div>
     {% if request.state.utente %}
+    {# Filtro Comune solo dove cambia qualcosa (Daniele, 21/09/2026): pagine per comune e Distretti;
+       la pagina del comune ha pagina_attiva 'mappa' come la Home, ma passa "comune". #}
+    {% if not senza_filtro_comune and (pagina_attiva in ('riepilogo', 'diagnostica', 'distretti') or (pagina_attiva == 'mappa' and comune)) %}
     <form class="filtri" method="get">
       <label for="comune">Comune</label>
       <select id="comune" name="comune" onchange="this.form.submit()">
@@ -21,6 +24,7 @@
         {% endfor %}
       </select>
     </form>
+    {% endif %}
     <div class="utente-header">
       <a href="/account">{{ request.state.utente.nome or request.state.utente.username }}</a>
       <span class="ruolo-badge">{{ request.state.utente.ruolo }}</span>
@@ -30,23 +34,33 @@
   </header>
   {% if request.state.utente %}
   <nav class="tabs">
-    <a href="/pagine/riepilogo{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
-       class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Riepilogo</a>
-    <a href="/pagine/diagnostica{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
+    <a href="/pagine/mappa" title="Home — mappa dei distretti" aria-label="Home"
+       class="tab-home {% if pagina_attiva == 'mappa' %}attivo{% endif %}">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      Home</a>
+    <a href="/pagine/panoramica"
+       class="{% if pagina_attiva == 'panoramica' %}attivo{% endif %}">Panoramica</a>
+    {# Gruppo "per comune": si portano dietro il comune scelto nel filtro #}
+    {% set q = '?comune=' + (comune_selezionato | urlencode) if comune_selezionato else '' %}
+    <span class="sep" aria-hidden="true"></span>
+    <a href="/pagine/riepilogo{{ q }}"
+       class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Volumi</a>
+    <a href="/pagine/diagnostica{{ q }}"
        class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica</a>
-    <a href="/pagine/grafici{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
-       class="{% if pagina_attiva == 'grafici' %}attivo{% endif %}">Grafici</a>
-    <a href="/pagine/distretti"
+    <span class="sep" aria-hidden="true"></span>
+    <a href="/pagine/distretti{{ q }}"
        class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
-    <a href="/pagine/mappa"
-       class="{% if pagina_attiva == 'mappa' %}attivo{% endif %}">Mappa</a>
-    <a href="/pagine/info{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
-       class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Info</a>
-    <a href="/pagine/storia{{ '?comune=' + comune_selezionato if comune_selezionato else '' }}"
-       class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Storia</a>
+    {% if request.state.utente.ruolo != 'viewer' %}
     <a href="/pagine/carica"
        class="{% if pagina_attiva == 'carica' %}attivo{% endif %}">Carica</a>
+    {% endif %}
+    <span class="sep" aria-hidden="true"></span>
+    <a href="/pagine/info"
+       class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Come funziona</a>
+    <a href="/pagine/storia"
+       class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Novità</a>
     {% if request.state.utente.ruolo == 'admin' %}
+    <span class="sep" aria-hidden="true"></span>
     <a href="/admin/utenti"
        class="{% if pagina_attiva == 'admin' %}attivo{% endif %}">Amministrazione</a>
     {% endif %}

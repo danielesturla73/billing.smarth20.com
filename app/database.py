@@ -86,6 +86,12 @@ def connessione():
         conn.close()
 
 
+def _int_fuori_range_a_testo(v):
+    if isinstance(v, int) and not isinstance(v, bool) and not -(2**63) <= v < 2**63:
+        return str(v)
+    return v
+
+
 def _riapplica_date(df: pd.DataFrame) -> pd.DataFrame:
     for col in COLONNE_DATA:
         if col in df.columns:
@@ -142,6 +148,13 @@ def aggiorna_letture(nuovi_file: list[str | Path], comune: str) -> tuple[pd.Data
         for col in COLONNE_DATA:
             if col in da_scrivere.columns:
                 da_scrivere[col] = da_scrivere[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+        # Interi fuori dal range di SQLite (int64): succede con codici
+        # identificativi numerici lunghissimi (es. MODULO_RADIO di GARLASCO,
+        # 5322538121488799629312, trovato il 21/09/2026: OverflowError e
+        # caricamento di 22 comuni fallito con Internal Server Error). Sono
+        # codici, non quantita': si scrivono come testo, senza perdere cifre.
+        for col in da_scrivere.columns[da_scrivere.dtypes == object]:
+            da_scrivere[col] = da_scrivere[col].map(_int_fuori_range_a_testo)
         da_scrivere.to_sql("letture", conn, if_exists="append", index=False)
         conn.commit()
         assicura_indici(conn)

@@ -1057,7 +1057,7 @@ def aggrega_origine_mensile(
     Interpolato (stima da reset di contatore non marcato, NON si
     autocorregge da sola — resta cosi' finche' non si verifica il dato con
     Neta H2O). Pensata per il grafico mensile impilato della pagina
-    /pagine/grafici (richiesto da Daniele il 18/09/2026): la % di stimato
+    pagina Volumi (richiesto da Daniele il 18/09/2026): la % di stimato
     non e' un indicatore unico perche' le due categorie hanno un percorso
     di risoluzione diverso (vedi conversazione), quindi restano separate
     fin da qui invece di essere sommate in un solo "% stimato".
@@ -1103,7 +1103,7 @@ def aggrega_utenza_mese(
     distretti validi — stessa finestra e stesso filtro degli altri
     risultati). Non finisce mai nel foglio Excel/nel JSON dei totali per
     distretto: serve solo come base per la classifica dei maggiori
-    consumatori mostrata in /pagine/grafici (richiesto da Daniele il
+    consumatori mostrata in pagina Volumi (richiesto da Daniele il
     18/09/2026), calcolata a richiesta dal layer web per un mese o un anno
     a scelta invece di essere precalcolata qui per ogni possibile periodo.
     """

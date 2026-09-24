@@ -54,6 +54,33 @@ templates = Jinja2Templates(directory="app/templates")
 # /static/style.css ad ogni rebuild) e le modifiche CSS non si vedono senza
 # un refresh forzato. La versione e' la data di modifica del file, letta una
 # volta all'avvio del container.
+def _numero_it(valore, decimali: int = 0) -> str:
+    """1234.5 -> '1.234,50' (separatori all'italiana, per i template)."""
+    testo = f"{valore:,.{decimali}f}"
+    return testo.replace(",", "\0").replace(".", ",").replace("\0", ".")
+
+
+templates.env.filters["it_num"] = _numero_it
+
+
+def _litri_secondo(volume_m3: float, giorni: int) -> float:
+    """Portata media equivalente: m3 -> l/s su `giorni` giorni (m3*1000 / (giorni*86400)).
+    Richiesta da Daniele il 21/09/2026 per chi si occupa di conduzione impianti:
+    e' la portata continua che darebbe quel volume, non un picco."""
+    return volume_m3 * 1000 / (giorni * 86400) if giorni else 0.0
+
+
+def _giorni_periodo(periodo: str | None) -> int:
+    """Giorni di un mese 'YYYY-MM' o di un trimestre 'YYYY-TN'."""
+    if not periodo:
+        return 0
+    if "-T" in periodo:
+        anno, trim = periodo.split("-T")
+        primo = (int(trim) - 1) * 3 + 1
+        return sum(pd.Period(f"{anno}-{m:02d}").days_in_month for m in range(primo, primo + 3))
+    return pd.Period(periodo).days_in_month
+
+
 templates.env.globals["css_version"] = int(
     (Path("app/static/style.css").stat().st_mtime)
 )
@@ -514,7 +541,7 @@ def _comuni_disponibili() -> list[str]:
 
 
 @app.get("/pagine/riepilogo")
-def pagina_riepilogo(request: Request, comune: str | None = None):
+def pagina_riepilogo(request: Request, comune: str | None = None, dal: str = "", al: str = ""):
     """Stessi dati di /riepilogo, mostrati come pagina HTML invece che
     JSON grezzo — la vista principale prevista dalle specifiche (sezione
     6.0): filtro Comune nell'header (persistente tra le pagine), KPI in
@@ -523,34 +550,57 @@ def pagina_riepilogo(request: Request, comune: str | None = None):
     """
     comuni_disponibili = _comuni_disponibili()
 
+    def filtra_periodo(volumi: pd.DataFrame) -> pd.DataFrame:
+        # Filtro periodo (richiesto da Daniele il 21/09/2026): dal/al mese
+        # inclusi, formato YYYY-MM, confronto sul testo perche' Mese e' un Period.
+        mesi = volumi["Mese"].astype(str)
+        maschera = pd.Series(True, index=volumi.index)
+        if dal:
+            maschera &= mesi >= dal
+        if al:
+            maschera &= mesi <= al
+        return volumi[maschera]
+
     if comune:
         trovati = list(_risultati_per_comune(comune))
         if not trovati:
             raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
         comune_trovato, risultato = trovati[0]
+        mesi_disponibili = sorted(risultato.volumi_distretto_mese["Mese"].astype(str).unique())
+        mesi_incompleti = _mesi_incompleti(risultato.volumi_distretto_mese)
+        volumi_periodo = filtra_periodo(risultato.volumi_distretto_mese)
         trimestri_provvisori = risultato.volumi_distretto_trimestre[
             risultato.volumi_distretto_trimestre["Contiene Stime Provvisorie"] == "Sì"
         ]["Trimestre"].nunique()
-        pivot = _pivot_mese_distretto(risultato.volumi_distretto_mese)
+        pivot = _pivot_mese_distretto(volumi_periodo)
         return templates.TemplateResponse(request, "riepilogo.html", {
+            "mesi_disponibili": mesi_disponibili,
+            "mesi_incompleti": mesi_incompleti,
+            "dal": dal,
+            "al": al,
             "request": request,
             "pagina_attiva": "riepilogo",
             "comuni_disponibili": comuni_disponibili,
             "comune_selezionato": comune_trovato,
             "comune": comune_trovato,
             "warning": risultato.warning,
-            "volume_totale": float(risultato.volumi_distretto_mese["Volume Fatturato (m3)"].sum()),
-            "n_mesi": int(risultato.volumi_distretto_mese["Mese"].nunique()),
+            "volume_totale": float(volumi_periodo["Volume Fatturato (m3)"].sum()),
+            "n_mesi": int(volumi_periodo["Mese"].nunique()),
             "trimestri_provvisori": int(trimestri_provvisori),
             "distretti": pivot["distretti"],
             "righe_pivot": pivot["righe"],
         })
 
+    tutti = list(_risultati_per_comune(None))
     riepilogo_comuni = [
-        {"comune": c, "volume_totale": float(r.volumi_distretto_mese["Volume Fatturato (m3)"].sum())}
-        for c, r in _risultati_per_comune(None)
+        {"comune": c, "volume_totale": float(filtra_periodo(r.volumi_distretto_mese)["Volume Fatturato (m3)"].sum())}
+        for c, r in tutti
     ]
+    mesi_disponibili = sorted({str(m) for _, r in tutti for m in r.volumi_distretto_mese["Mese"].unique()})
     return templates.TemplateResponse(request, "riepilogo.html", {
+        "mesi_disponibili": mesi_disponibili,
+        "dal": dal,
+        "al": al,
         "request": request,
         "pagina_attiva": "riepilogo",
         "comuni_disponibili": comuni_disponibili,
@@ -641,7 +691,8 @@ def pagina_utenza(request: Request, comune: str, codice_servizio: int | None = N
 
     return templates.TemplateResponse(request, "utenza.html", {
         "request": request,
-        "pagina_attiva": None,
+        "senza_filtro_comune": True,  # dettaglio di un'utenza: il filtro Comune qui non ha senso
+        "pagina_attiva": "diagnostica",
         "comuni_disponibili": comuni_disponibili,
         "comune_selezionato": comune,
         "comune": comune,
@@ -659,55 +710,12 @@ def pagina_utenza(request: Request, comune: str, codice_servizio: int | None = N
     })
 
 
-@app.get("/pagine/grafici")
-def pagina_grafici(request: Request, comune: str | None = None):
-    """Grafici (Chart.js, vedi style-guide-wms-smarth2o.md) confermati da
-    Daniele il 18/09/2026: volumi mensili per distretto scomposti in
-    reale/provvisorio/interpolato, ripartizione consumi per classe d'uso,
-    classifica dei maggiori consumatori. I primi due grafici usano dataset
-    piccoli (poche righe per distretto/mese o per distretto/classe) e
-    vengono incorporati direttamente nella pagina; la classifica dei
-    maggiori consumatori no (fino a decine di migliaia di righe per
-    comune, una per utenza per mese) — quella viene ricalcolata a
-    richiesta da /api/top_consumatori quando si cambia il periodo.
-    """
-    comuni_disponibili = _comuni_disponibili()
-
-    if not comune:
-        return templates.TemplateResponse(request, "grafici.html", {
-            "request": request,
-            "pagina_attiva": "grafici",
-            "comuni_disponibili": comuni_disponibili,
-            "comune_selezionato": None,
-            "comune": None,
-        })
-
-    trovati = list(_risultati_per_comune(comune))
-    if not trovati:
-        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
-    comune_trovato, risultato = trovati[0]
-
-    mesi_disponibili = sorted(str(m) for m in risultato.volumi_utenza_mese["Mese"].unique())
-    anni_disponibili = sorted({m[:4] for m in mesi_disponibili})
-
-    return templates.TemplateResponse(request, "grafici.html", {
-        "request": request,
-        "pagina_attiva": "grafici",
-        "comuni_disponibili": comuni_disponibili,
-        "comune_selezionato": comune_trovato,
-        "comune": comune_trovato,
-        "origine_mensile": _tabella_json(risultato.volumi_distretto_mese_origine),
-        "classe_uso": _tabella_json(risultato.statistiche_classe_uso),
-        "mesi_disponibili": mesi_disponibili,
-        "anni_disponibili": anni_disponibili,
-    })
-
-
 @app.get("/api/top_consumatori")
-def api_top_consumatori(comune: str, periodo: str, n: int = 10):
-    """Classifica dei maggiori consumatori per un mese ('YYYY-MM') o un
-    anno intero ('YYYY') — calcolata a richiesta su risultato.volumi_utenza_mese
-    (vedi pagina_grafici) invece che incorporata nella pagina, perche' quella
+def api_top_consumatori(comune: str, dal: str = "", al: str = "", n: int = 10):
+    """Classifica dei maggiori consumatori nel periodo dal/al (mesi inclusi,
+    'YYYY-MM', stesso filtro della pagina Volumi; vuoto = senza limite) —
+    calcolata a richiesta su risultato.volumi_utenza_mese invece che
+    incorporata nella pagina (vedi pagina_riepilogo), perche' quella
     tabella e' granulare per singola utenza e puo' avere decine di migliaia
     di righe per comune.
     """
@@ -720,12 +728,13 @@ def api_top_consumatori(comune: str, periodo: str, n: int = 10):
     if df.empty:
         return {"utenze": []}
 
-    if len(periodo) == 7:
-        selezione = df[df["Mese"].astype(str) == periodo]
-    elif len(periodo) == 4:
-        selezione = df[df["Mese"].dt.year == int(periodo)]
-    else:
-        raise HTTPException(status_code=422, detail="Periodo non valido: usa 'YYYY-MM' o 'YYYY'")
+    mesi = df["Mese"].astype(str)
+    maschera = pd.Series(True, index=df.index)
+    if dal:
+        maschera &= mesi >= dal
+    if al:
+        maschera &= mesi <= al
+    selezione = df[maschera]
 
     if selezione.empty:
         return {"utenze": []}
@@ -754,10 +763,7 @@ def api_top_consumatori(comune: str, periodo: str, n: int = 10):
     # Consumo medio giornaliero STIMATO: il volume del periodo selezionato
     # diviso i giorni di calendario del periodo — e' una media, non una
     # misura (lo stesso principio della proratazione mensile del Metodo B).
-    if len(periodo) == 7:
-        giorni_periodo = pd.Period(periodo, freq="M").days_in_month
-    else:
-        giorni_periodo = sum(m.days_in_month for m in selezione["Mese"].unique())
+    giorni_periodo = sum(m.days_in_month for m in selezione["Mese"].unique())
     top["Consumo Medio Stimato (m3/giorno)"] = (top["Volume (m3)"] / giorni_periodo).round(2)
 
     # Ritmo REALE: il m3/giorno dell'ULTIMA differenza tra due letture reali
@@ -767,10 +773,13 @@ def api_top_consumatori(comune: str, periodo: str, n: int = 10):
     # Se l'utenza non ha nessun confronto reale in quel periodo (solo stime
     # provvisorie/interpolate), resta vuoto: non si inventa un valore.
     rif = risultato.riferimento_prodie
-    if len(periodo) == 7:
-        rif_periodo = rif[rif["DATA_FINE"].dt.to_period("M").astype(str) == periodo]
-    else:
-        rif_periodo = rif[rif["DATA_FINE"].dt.year == int(periodo)]
+    mesi_fine = rif["DATA_FINE"].dt.to_period("M").astype(str)
+    maschera_rif = pd.Series(True, index=rif.index)
+    if dal:
+        maschera_rif &= mesi_fine >= dal
+    if al:
+        maschera_rif &= mesi_fine <= al
+    rif_periodo = rif[maschera_rif]
     ritmo_reale = (
         rif_periodo[rif_periodo["CODICE_SERVIZIO"].isin(top["Codice Servizio"])]
         .sort_values("DATA_FINE")
@@ -1032,6 +1041,7 @@ def _dati_tematici_mappa() -> dict:
     """
     dati: dict = {}
     for comune, risultato in _risultati_per_comune(None):
+        incompleti = set(_mesi_incompleti(risultato.volumi_distretto_mese))
         origine = risultato.volumi_distretto_mese_origine
         if not origine.empty:
             ultimo_mese = origine.groupby("Codice Distretto")["Mese"].transform("max")
@@ -1044,6 +1054,7 @@ def _dati_tematici_mappa() -> dict:
                     "pct_reale": round(r["Reale (m3)"] / totale * 100, 1) if totale else 0,
                     "pct_provvisorio": round(r["Provvisorio (m3)"] / totale * 100, 1) if totale else 0,
                     "pct_interpolato": round(r["Interpolato (m3)"] / totale * 100, 1) if totale else 0,
+                    "incompleto": str(r["Mese"]) in incompleti,
                     "n_segnalazioni": 0,
                 }
 
@@ -1058,6 +1069,7 @@ def _dati_tematici_mappa() -> dict:
                 dati[codice] = {
                     "comune": comune, "mese": None, "volume": None,
                     "pct_reale": None, "pct_provvisorio": None, "pct_interpolato": None,
+                    "incompleto": False,
                     "n_segnalazioni": int(n),
                 }
     return dati
@@ -1088,9 +1100,46 @@ def _geojson_per_mappa() -> tuple[dict, bool]:
 NON_DISTRETTI = ("NODMA", "ND")
 
 
-def _stato_dato(pct_provvisorio, pct_interpolato) -> str:
+# Mese INCOMPLETO (concordato con Daniele il 21/09/2026): dopo l'ultimo giro
+# di letture di un comune mancano ancora le letture di chiusura del periodo
+# (es. Rivanazzano a maggio-giugno con giro ad aprile, Belgioioso a giugno
+# con giro a maggio), quindi il volume del mese e' una frazione del normale
+# e non e' una stima provvisoria: il badge "Provvisorio" (quota di stime)
+# non lo vedeva e Rivanazzano risultava "Consolidato". Un mese e' incompleto
+# se il volume del comune e' sotto il 70% della mediana degli ultimi 3 mesi
+# NON incompleti (cosi' due o tre mesi incompleti di fila non falsano il
+# riferimento). Non cambia il Metodo B ne' i totali: e' solo un'indicazione;
+# quando arriva la lettura di chiusura il mese si corregge da solo. Servono
+# almeno 2 mesi precedenti per confrontare (i primi mesi dell'archivio, con
+# la catena di letture appena iniziata, restano a Metodo B/fuori periodo).
+SOGLIA_MESE_INCOMPLETO = 0.70
+
+
+def _mesi_incompleti(volumi_distretto_mese: pd.DataFrame) -> list[str]:
+    if volumi_distretto_mese.empty:
+        return []
+    totali = (
+        volumi_distretto_mese.assign(Mese=volumi_distretto_mese["Mese"].astype(str))
+        .groupby("Mese")["Volume Fatturato (m3)"].sum().sort_index()
+    )
+    buoni: list[float] = []
+    incompleti: list[str] = []
+    for mese, volume in totali.items():
+        if len(buoni) >= 2:
+            riferimento = sorted(buoni[-3:])[len(buoni[-3:]) // 2]
+            if volume < SOGLIA_MESE_INCOMPLETO * riferimento:
+                incompleti.append(mese)
+                continue
+        buoni.append(float(volume))
+    return incompleti
+
+
+def _stato_dato(pct_provvisorio, pct_interpolato, incompleto: bool = False) -> str:
     """Stessa regola di colore del tema "Affidabilita'" della mappa
-    (mappa.html): interpolato > provvisorio (oltre il 10%) > consolidato."""
+    (mappa.html): incompleto > interpolato > provvisorio (oltre il 10%) >
+    consolidato."""
+    if incompleto:
+        return "incompleto"
     if pct_interpolato and pct_interpolato > 0:
         return "interpolato"
     if pct_provvisorio and pct_provvisorio > 10:
@@ -1119,10 +1168,53 @@ def _righe_comuni_mappa(dati: dict, comuni: list[str]) -> list[dict]:
             "n_distretti": len(distretti),
             "mese": mese,
             "volume": round(volume, 2) if mese else None,
-            "stato": _stato_dato(prov / volume * 100 if volume else 0, interp / volume * 100 if volume else 0) if mese else None,
+            "stato": _stato_dato(
+                prov / volume * 100 if volume else 0, interp / volume * 100 if volume else 0,
+                any(v["incompleto"] for v in ultimi),
+            ) if mese else None,
             "n_segnalazioni": sum(v["n_segnalazioni"] for v in distretti.values()),
         })
     return righe
+
+
+def _dati_panoramica() -> dict:
+    """Volume (Import_WMS, Metodo B) mese per mese di tutti i comuni, per
+    la pagina Panoramica (richiesta da Daniele il 21/09/2026: colpo
+    d'occhio su tutti i comuni, bilancio poi fatto semestre per semestre).
+    Per ogni comune parte dal primo mese "non cold start" (lo stesso di
+    grafici/statistiche: origine.Mese.min) e arriva fino all'ultimo mese
+    calcolato, segnando quelli incompleti (vedi _mesi_incompleti) invece di
+    tagliarli: cosi' si vede fin dove arriva ogni comune.
+    """
+    comuni = []
+    for comune, risultato in _risultati_per_comune(None):
+        v = risultato.volumi_distretto_mese
+        if v.empty:
+            continue
+        per_mese = (
+            v.assign(Mese=v["Mese"].astype(str)).groupby("Mese")["Volume Fatturato (m3)"].sum().sort_index()
+        )
+        origine = risultato.volumi_distretto_mese_origine
+        if not origine.empty:
+            per_mese = per_mese[per_mese.index >= str(origine["Mese"].min())]
+        comuni.append({
+            "nome": comune,
+            "volumi": {m: round(float(x)) for m, x in per_mese.items()},
+            "incompleti": [m for m in _mesi_incompleti(v) if m in per_mese.index],
+        })
+    mesi = sorted({m for c in comuni for m in c["volumi"]})
+    return {"comuni": sorted(comuni, key=lambda c: c["nome"]), "mesi": mesi}
+
+
+@app.get("/pagine/panoramica")
+def pagina_panoramica(request: Request):
+    return templates.TemplateResponse(request, "panoramica.html", {
+        "request": request,
+        "pagina_attiva": "panoramica",
+        "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": None,
+        "dati": _dati_panoramica(),
+    })
 
 
 @app.get("/pagine/mappa")
@@ -1177,6 +1269,9 @@ def pagina_comune(request: Request, comune: str, distretto: str | None = None, c
     origine = risultato.volumi_distretto_mese_origine
     origine_valida = origine[~origine["Codice Distretto"].isin(NON_DISTRETTI)]
     ultimo_mese = str(origine_valida["Mese"].max()) if not origine_valida.empty else None
+    mesi_incompleti = _mesi_incompleti(risultato.volumi_distretto_mese)
+    ultimo_incompleto = ultimo_mese in mesi_incompleti
+    giorni_mese = _giorni_periodo(ultimo_mese)
 
     segnalazioni = pd.concat([
         risultato.anomalie_metodo_b[["DISTRETTO"]].rename(columns={"DISTRETTO": "Codice Distretto"}),
@@ -1197,13 +1292,40 @@ def pagina_comune(request: Request, comune: str, distretto: str | None = None, c
             "codice": codice,
             "nome": elenco["nome_distretto"].get(codice) or codice,
             "volume": round(totale, 2),
+            "ls": round(_litri_secondo(totale, giorni_mese), 2),
             "pct_reale": round(reale / totale * 100, 1) if totale else 0,
             "pct_provvisorio": round(pct_prov, 1),
             "pct_interpolato": round(pct_interp, 1),
-            "stato": _stato_dato(pct_prov, pct_interp) if totale else None,
+            "stato": _stato_dato(pct_prov, pct_interp, ultimo_incompleto) if totale else None,
             "utenze": int(utenze.get(codice, 0)),
             "n_segnalazioni": int(segnalazioni.get(codice, 0)),
             "condiviso": bool(comune_ufficiale) and comune_ufficiale != comune_trovato,
+        })
+
+    # Ultime righe della tabella (richiesta da Daniele il 21/09/2026): NODMA =
+    # utenza fuori distretto, ND = distretto non indicato ("*" o vuoto, oppure
+    # codice anomalo). Volume dell'ultimo mese come le altre righe; utenze =
+    # attive oggi (da statistiche_classe_uso, l'unica vista che le conta).
+    # Restano FUORI da righe_distretti: non entrano in KPI, mappa e heatmap,
+    # che sono solo sui distretti veri (come Import_WMS).
+    stat = risultato.statistiche_classe_uso
+    righe_fuori_distretto = []
+    for codice, nome in (("NODMA", "Fuori distretto"), ("ND", "Distretto non indicato")):
+        r = origine[(origine["Codice Distretto"] == codice) & (origine["Mese"].astype(str) == ultimo_mese)]
+        reale, prov, interp = (float(r[c].sum()) for c in ("Reale (m3)", "Provvisorio (m3)", "Interpolato (m3)"))
+        totale = reale + prov + interp
+        utenze_att = stat.loc[stat["Codice Distretto"] == codice, "Utenze Attive Oggi"].sum()
+        if not totale and not utenze_att:
+            continue
+        righe_fuori_distretto.append({
+            "codice": codice,
+            "nome": nome,
+            "volume": round(totale, 2),
+            "ls": round(_litri_secondo(totale, giorni_mese), 2),
+            "pct_reale": round(reale / totale * 100, 1) if totale else 0,
+            "pct_provvisorio": round(prov / totale * 100, 1) if totale else 0,
+            "pct_interpolato": round(interp / totale * 100, 1) if totale else 0,
+            "utenze": int(utenze_att),
         })
 
     # KPI: ultimo mese, ultimo trimestre, variazione sullo stesso mese
@@ -1250,13 +1372,19 @@ def pagina_comune(request: Request, comune: str, distretto: str | None = None, c
         "stato_comune": _stato_dato(
             sum(d["volume"] * d["pct_provvisorio"] / 100 for d in righe_distretti) / volume_mese * 100 if volume_mese else 0,
             sum(d["volume"] * d["pct_interpolato"] / 100 for d in righe_distretti) / volume_mese * 100 if volume_mese else 0,
+            ultimo_incompleto,
         ) if volume_mese else None,
+        "mesi_incompleti": mesi_incompleti,
         "volume_mese": round(volume_mese, 2),
+        "ls_mese": round(_litri_secondo(volume_mese, giorni_mese), 2),
+        "giorni_mese": giorni_mese,
+        "ls_trimestre": round(_litri_secondo(trimestre_kpi["volume"], _giorni_periodo(trimestre_kpi["trimestre"])), 2) if trimestre_kpi else None,
         "variazione": variazione,
         "trimestre_kpi": trimestre_kpi,
         "utenze_totali": sum(d["utenze"] for d in righe_distretti),
         "n_segnalazioni": sum(d["n_segnalazioni"] for d in righe_distretti),
         "righe_distretti": righe_distretti,
+        "righe_fuori_distretto": righe_fuori_distretto,
         "geojson": geojson,
         "origine_mensile": _tabella_json(origine),
         "classe_uso": _tabella_json(risultato.statistiche_classe_uso),

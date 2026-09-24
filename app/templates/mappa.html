@@ -30,7 +30,7 @@
     <div class="table-scroll">
       <table id="tabella-comuni">
         <thead>
-          <tr><th>Comune</th><th class="num">Distretti</th><th class="num">Ultimo mese</th>
+          <tr><th>Comune</th><th class="num">Distr.</th><th class="num">Ultimo mese</th>
               <th class="num">Volume (m³)</th><th>Dati</th><th class="num">Segn.</th></tr>
         </thead>
         <tbody>
@@ -40,7 +40,8 @@
             <td class="num">{{ c.n_distretti }}</td>
             <td class="num">{{ c.mese or '—' }}</td>
             <td class="num">{{ "{:,.0f}".format(c.volume).replace(",", ".") if c.volume is not none else '—' }}</td>
-            <td>{% if c.stato == 'consolidato' %}<span class="badge real">Consolidato</span>
+            <td>{% if c.stato == 'incompleto' %}<span class="badge nodata" title="Volume dell'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Incompleto</span>
+                {% elif c.stato == 'consolidato' %}<span class="badge real">Consolidato</span>
                 {% elif c.stato == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
                 {% elif c.stato == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Interpolato</span>
                 {% else %}<span class="badge nodata">Nessun dato</span>{% endif %}</td>
@@ -75,6 +76,7 @@
   const AMBRA = '#B9700B';
   const ROSSO = '#B3261E';
   const TEAL_CHIARO = '#E4F3F3';
+  const GRIGIO_INCOMPLETO = '#6B7F8A';
 
   function interpolaColore(hexA, hexB, t) {
     t = Math.max(0, Math.min(1, t));
@@ -91,13 +93,14 @@
     affidabilita: {
       colore: function (v) {
         if (!v || v.volume == null) return GRIGIO_NEUTRO;
+        if (v.incompleto) return GRIGIO_INCOMPLETO;
         if (v.pct_interpolato > 0) return ROSSO;
         if (v.pct_provvisorio > 10) return AMBRA;
         return VERDE;
       },
       legenda: [
         [VERDE, 'Consolidato'], [AMBRA, 'Parzialmente provvisorio'],
-        [ROSSO, 'Contiene interpolato'], [GRIGIO_NEUTRO, 'Nessun dato'],
+        [ROSSO, 'Contiene interpolato'], [GRIGIO_INCOMPLETO, 'Mese incompleto'], [GRIGIO_NEUTRO, 'Nessun dato'],
       ],
     },
     volume: {
@@ -147,7 +150,7 @@
     if (!v) return 'Nessun dato (comune non ancora caricato)';
     let righe = [];
     if (v.volume != null) {
-      righe.push(`Volume ${v.mese}: <strong>${v.volume.toLocaleString('it-IT')} m³</strong>`);
+      righe.push(`Volume ${v.mese}: <strong>${v.volume.toLocaleString('it-IT')} m³</strong>` + (v.incompleto ? ' — <em>mese incompleto</em>' : ''));
       righe.push(`Reale ${v.pct_reale}% · Provvisorio ${v.pct_provvisorio}% · Interpolato ${v.pct_interpolato}%`);
     }
     righe.push(`Segnalazioni aperte: <strong>${v.n_segnalazioni}</strong>`);

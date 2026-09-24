@@ -2,6 +2,7 @@
 {% block titolo %}Accesso — Analisi Consumi da Fatturazione{% endblock %}
 {% block contenuto %}
 <div class="panel box-accesso">
+  <div class="badge-prototipo">🚧 Prototipo in fase di sviluppo — Ing. Daniele Sturla</div>
   <h2>Accesso</h2>
   {% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
   <form method="post" action="/login">
@@ -12,5 +13,9 @@
       <input id="password" type="password" name="password" required autocomplete="current-password"></div>
     <button type="submit" class="btn-primario">Entra</button>
   </form>
+  <div class="disclaimer-accesso">
+    <p>Questo strumento è un applicativo sviluppato nel tempo libero a supporto dell'attività tecnica di analisi dei consumi e bilancio idrico, non è un sistema informativo aziendale certificato né sostituisce i gestionali ufficiali. Tratta dati di utenza limitatamente a quanto necessario per il calcolo, con accesso riservato. I risultati sono forniti a scopo di supporto operativo e vanno verificati prima di un uso ufficiale o esterno.</p>
+    <p>Manutenzione e responsabilità tecnica: Daniele Sturla.<br>Accesso riservato al personale autorizzato.</p>
+  </div>
 </div>
 {% endblock %}

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block titolo %}Panoramica — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Panoramica di tutti i comuni</h1>
+<p class="nota-metodologica">
+  Volume consumato (Metodo B, lo stesso di Import_WMS) mese per mese. I mesi <strong>incompleti</strong>
+  (volume sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura) sono mostrati più
+  chiari nei grafici a barre, non sono disegnati nei mini-grafici, e si correggono da soli quando arrivano le letture. Il totale di un mese con comuni
+  incompleti è quindi sottostimato: guarda il numero indicato nel grafico.
+</p>
+
+<div class="panel">
+  <div class="filtri-grafico">
+    <label for="filtro-periodo">Periodo</label>
+    <select id="filtro-periodo"></select>
+  </div>
+  <div class="kpi-grid compatto" id="kpi"></div>
+</div>
+
+<div class="panel">
+  <h2>Totale di tutti i comuni, per mese (m³)</h2>
+  <div class="chart-wrap"><canvas id="chart-totale"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Chi pesa di più: primi 8 comuni, gli altri raggruppati (m³)</h2>
+  <div class="chart-wrap" style="height:320px"><canvas id="chart-impilato"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>Andamento di ogni comune</h2>
+  <p class="nota-metodologica" style="margin-bottom:12px">
+    Ogni mini-grafico ha la sua scala (parte da zero): serve a confrontare la <em>forma</em> dell'andamento,
+    non la grandezza tra comuni. I mesi incompleti non sono disegnati: la linea si ferma all'ultimo mese
+    completo. Clic per aprire il comune.
+  </p>
+  <div class="griglia-mini" id="griglia-mini"></div>
+</div>
+
+<div class="panel">
+  <h2>Tabella comuni × mesi (migliaia di m³)</h2>
+  <p class="nota-metodologica" style="margin-bottom:12px">
+    Il colore misura il volume rispetto alla mediana dei mesi completi dello stesso comune: più scuro = più
+    alto. Bordo tratteggiato = mese incompleto; cella vuota = mese non disponibile.
+  </p>
+  <div class="table-scroll" style="max-height:none">
+    <table class="heatmap" id="tabella-heatmap"></table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const DATI = {{ dati | tojson }};
+  const COMUNI = DATI.comuni, MESI = DATI.mesi;
+
+  const TEAL = '#0E7C86', TEAL_DARK = '#0A5C63', TEAL_CHIARO = '#E4F3F3', GRIGIO = '#8B9DA6';
+  // Stessa palette categorica gia' validata in Grafici, ordine fisso: il
+  // colore segue il comune (classifica sul periodo intero), non il periodo scelto.
+  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+  const fmt = n => Math.round(n).toLocaleString('it-IT');
+  const chiaro = (colore, incompleto) => incompleto ? colore + '55' : colore;
+
+  const incompleti = Object.fromEntries(COMUNI.map(c => [c.nome, new Set(c.incompleti)]));
+  const totaleComune = c => Object.values(c.volumi).reduce((s, x) => s + x, 0);
+  const classifica = [...COMUNI].sort((a, b) => totaleComune(b) - totaleComune(a));
+  const colorePer = Object.fromEntries(classifica.slice(0, 8).map((c, i) => [c.nome, PALETTE[i]]));
+
+  // ---- Periodo: tutto, oppure un semestre (gen-giu / lug-dic) ----
+  const semestri = [...new Set(MESI.map(m => m.slice(0, 4) + '-S' + (+m.slice(5) <= 6 ? 1 : 2)))].sort();
+  const etichettaSemestre = s => `${s.slice(0, 4)} ${s.endsWith('S1') ? 'gen–giu' : 'lug–dic'}`;
+  const selPeriodo = document.getElementById('filtro-periodo');
+  selPeriodo.innerHTML = '<option value="tutto">Tutti i mesi</option>' +
+    semestri.map(s => `<option value="${s}">${etichettaSemestre(s)}</option>`).join('');
+  const meseInSemestre = (m, s) => m.slice(0, 4) + '-S' + (+m.slice(5) <= 6 ? 1 : 2) === s;
+  const mesiDel = s => s === 'tutto' ? MESI : MESI.filter(m => meseInSemestre(m, s));
+
+  // Con gia' un semestre scelto: quello precedente, per il confronto.
+  function semestrePrecedente(s) {
+    if (s === 'tutto') return null;
+    const i = semestri.indexOf(s);
+    return i > 0 ? semestri[i - 1] : null;
+  }
+
+  let grafici = [];
+  function render() {
+    grafici.forEach(g => g.destroy());
+    grafici = [];
+    const sel = selPeriodo.value, mesi = mesiDel(sel);
+    const vol = (c, m) => c.volumi[m];
+    const totaleMese = m => COMUNI.reduce((s, c) => s + (vol(c, m) || 0), 0);
+    const nIncompleti = m => COMUNI.filter(c => incompleti[c.nome].has(m)).length;
+
+    // ---- KPI ----
+    const totale = mesi.reduce((s, m) => s + totaleMese(m), 0);
+    const mesiIncompleti = mesi.filter(m => nIncompleti(m) > 0);
+    const prec = semestrePrecedente(sel);
+    let confronto = '—';
+    if (prec) {
+      const totPrec = mesiDel(prec).reduce((s, m) => s + totaleMese(m), 0);
+      if (totPrec) confronto = ((totale - totPrec) / totPrec * 100).toLocaleString('it-IT', { maximumFractionDigits: 1, signDisplay: 'exceptZero' }) + '%';
+    }
+    const comuniInc = COMUNI.filter(c => mesi.some(m => incompleti[c.nome].has(m))).length;
+    document.getElementById('kpi').innerHTML = `
+      <div class="kpi"><div class="etichetta">Volume del periodo</div><div class="valore">${fmt(totale)} m³</div></div>
+      <div class="kpi ${prec && mesiIncompleti.length ? 'warn' : ''}"><div class="etichetta">Variazione sul semestre precedente</div><div class="valore">${confronto}</div></div>
+      <div class="kpi ${comuniInc ? 'warn' : ''}"><div class="etichetta">Comuni con mesi incompleti nel periodo</div><div class="valore">${comuniInc} su ${COMUNI.length}</div></div>`;
+
+    const asseX = { grid: { display: false } };
+    const asseY = stacked => ({ stacked, beginAtZero: true, grid: { color: '#DCE4E9' }, ticks: { callback: v => v.toLocaleString('it-IT') } });
+
+    // ---- 1. Totale per mese ----
+    grafici.push(new Chart(document.getElementById('chart-totale'), {
+      type: 'bar',
+      data: { labels: mesi, datasets: [{
+        label: 'Totale', data: mesi.map(totaleMese),
+        backgroundColor: mesi.map(m => chiaro(TEAL, nIncompleti(m) > 0)),
+        borderRadius: 4, maxBarThickness: 28,
+      }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: asseX, y: asseY(false) },
+        plugins: { legend: { display: false }, tooltip: { callbacks: {
+          label: it => `${fmt(it.parsed.y)} m³`,
+          afterLabel: it => nIncompleti(mesi[it.dataIndex]) ? `${nIncompleti(mesi[it.dataIndex])} comuni incompleti: totale sottostimato` : '',
+        } } },
+      },
+    }));
+
+    // ---- 2. Impilato: primi 8 + Altri ----
+    const top = classifica.slice(0, 8);
+    const altri = classifica.slice(8);
+    const dataset = (nome, colore, gruppo) => ({
+      label: nome, stack: 'v', borderColor: '#FFFFFF', borderWidth: 2, borderRadius: 3, maxBarThickness: 28,
+      data: mesi.map(m => gruppo.reduce((s, c) => s + (vol(c, m) || 0), 0)),
+      backgroundColor: mesi.map(m => chiaro(colore, gruppo.some(c => incompleti[c.nome].has(m)))),
+    });
+    grafici.push(new Chart(document.getElementById('chart-impilato'), {
+      type: 'bar',
+      data: { labels: mesi, datasets: [
+        ...top.map((c, i) => dataset(c.nome, PALETTE[i], [c])),
+        ...(altri.length ? [dataset(`Altri ${altri.length} comuni`, GRIGIO, altri)] : []),
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        scales: { x: { ...asseX, stacked: true }, y: asseY(true) },
+        plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: it => `${it.dataset.label}: ${fmt(it.parsed.y)} m³` } } },
+      },
+    }));
+
+    // ---- 3. Griglia: un mini-grafico per comune ----
+    const griglia = document.getElementById('griglia-mini');
+    griglia.innerHTML = '';
+    COMUNI.forEach(c => {
+      const ultimo = [...mesi].reverse().find(m => vol(c, m) != null && !incompleti[c.nome].has(m));
+      const a = document.createElement('a');
+      a.className = 'mini-comune';
+      a.href = '/pagine/comune/' + encodeURIComponent(c.nome);
+      a.innerHTML = `<div class="nome">${c.nome}<span>${ultimo ? fmt(vol(c, ultimo)) : '—'}</span></div>` +
+        '<div class="mini-wrap"><canvas></canvas></div>';
+      griglia.appendChild(a);
+      grafici.push(new Chart(a.querySelector('canvas'), {
+        type: 'line',
+        data: { labels: mesi, datasets: [{
+          // I mesi incompleti non si disegnano: una linea che scende a
+          // fine serie farebbe credere a un calo dei consumi (Daniele, 21/09/2026).
+          data: mesi.map(m => incompleti[c.nome].has(m) ? null : (vol(c, m) ?? null)),
+          borderColor: TEAL_DARK, backgroundColor: TEAL_DARK, borderWidth: 2, tension: 0.25,
+          pointRadius: 0, pointHoverRadius: 4, spanGaps: false,
+        }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+          plugins: { legend: { display: false }, tooltip: { callbacks: {
+            label: it => `${fmt(it.parsed.y)} m³`,
+          } } },
+        },
+      }));
+    });
+
+    // ---- 4. Tabella comuni x mesi (heatmap) ----
+    const mediana = arr => { const s = [...arr].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+    const mescola = (t) => {  // t 0..1: TEAL_CHIARO -> TEAL_DARK
+      const h = x => x.match(/\w\w/g).map(v => parseInt(v, 16));
+      const a = h(TEAL_CHIARO), b = h(TEAL_DARK);
+      return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
+    };
+    let html = '<thead><tr><th style="text-align:left">Comune</th>' + mesi.map(m => `<th>${m}</th>`).join('') + '</tr></thead><tbody>';
+    COMUNI.forEach(c => {
+      const rif = mediana(mesi.filter(m => vol(c, m) != null && !incompleti[c.nome].has(m)).map(m => vol(c, m)));
+      html += `<tr><td style="text-align:left"><a href="/pagine/comune/${encodeURIComponent(c.nome)}">${c.nome}</a></td>`;
+      mesi.forEach(m => {
+        const v = vol(c, m);
+        if (v == null) { html += '<td></td>'; return; }
+        const inc = incompleti[c.nome].has(m);
+        const t = rif ? Math.max(0, Math.min(1, (v / rif - 0.3) / 1.0)) : 0;
+        html += `<td class="${inc ? 'provv' : ''}" title="${c.nome} ${m}: ${fmt(v)} m³${inc ? ' — mese incompleto' : ''}" ` +
+          `style="background:${mescola(t)};color:${t > 0.55 ? '#FFFFFF' : '#152631'}">${(v / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })}</td>`;
+      });
+      html += '</tr>';
+    });
+    document.getElementById('tabella-heatmap').innerHTML = html + '</tbody>';
+  }
+
+  selPeriodo.addEventListener('change', render);
+  // Predefinito: l'ultimo semestre che ha dati, non tutta la storia.
+  selPeriodo.value = semestri.length ? semestri[semestri.length - 1] : 'tutto';
+  render();
+})();
+</script>
+{% endblock %}

@@ -1,8 +1,24 @@
 {% extends "base.html" %}
-{% block titolo %}Riepilogo — Analisi Consumi da Fatturazione{% endblock %}
+{% block titolo %}Volumi — Analisi Consumi da Fatturazione{% endblock %}
 {% block contenuto %}
+{% macro filtro_periodo(comune) %}
+<form method="get" class="filtri-grafico">
+  {% if comune %}<input type="hidden" name="comune" value="{{ comune }}">{% endif %}
+  <label for="dal">Dal mese</label>
+  <select id="dal" name="dal" onchange="this.form.submit()">
+    <option value="">Primo disponibile</option>
+    {% for m in mesi_disponibili %}<option value="{{ m }}" {% if m == dal %}selected{% endif %}>{{ m }}</option>{% endfor %}
+  </select>
+  <label for="al">al mese</label>
+  <select id="al" name="al" onchange="this.form.submit()">
+    <option value="">Ultimo disponibile</option>
+    {% for m in mesi_disponibili %}<option value="{{ m }}" {% if m == al %}selected{% endif %}>{{ m }}</option>{% endfor %}
+  </select>
+  {% if dal or al %}<a href="/pagine/riepilogo{{ '?comune=' + comune if comune else '' }}">Azzera periodo</a>{% endif %}
+</form>
+{% endmacro %}
 {% if comune %}
-  <h1>Riepilogo — {{ comune }}</h1>
+  <h1>Volumi — {{ comune }}</h1>
   <p class="nota-metodologica">
     Volume calcolato con il Metodo B: differenza fisica tra letture reali consecutive del contatore
     (le stime intermedie vengono conguagliate dalla lettura reale successiva, non sommate). I trimestri
@@ -19,6 +35,7 @@
   </details>
   {% endif %}
 
+  {{ filtro_periodo(comune) }}
   <div class="kpi-grid">
     <div class="kpi">
       <div class="etichetta">Volume totale periodo</div>
@@ -48,7 +65,7 @@
         <tbody>
           {% for r in righe_pivot %}
           <tr>
-            <td>{{ r["Mese"] }}</td>
+            <td>{{ r["Mese"] }}{% if r["Mese"] in mesi_incompleti %} <span class="badge nodata" title="Volume sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura del periodo, si corregge da solo">Incompleto</span>{% endif %}</td>
             {% for d in distretti %}<td class="num">{{ "{:.0f}".format(r[d]) }}</td>{% endfor %}
             <td class="num"><strong>{{ "{:.0f}".format(r["Totale"]) }}</strong></td>
           </tr>
@@ -57,12 +74,59 @@
       </table>
     </div>
   </div>
+
+  <div class="panel">
+    <h2>Top consumatori</h2>
+    <p class="nota-metodologica">Le 10 utenze con il volume più alto nel periodo scelto sopra ({{ dal or 'primo mese' }} → {{ al or 'ultimo mese' }}).</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto</th><th>Classe d'uso</th>
+            <th class="num">Volume (m³)</th>
+            <th class="num">Media stimata (m³/g)</th>
+            <th class="num">Ritmo reale ultima lettura (m³/g)</th>
+          </tr>
+        </thead>
+        <tbody id="corpo-top10"><tr><td colspan="8">Caricamento…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    const COMUNE = {{ comune | tojson }};
+    const corpo = document.getElementById('corpo-top10');
+    const fmt = (v, d) => v == null ? '—' : v.toLocaleString('it-IT', {maximumFractionDigits: d});
+    const q = new URLSearchParams({ comune: COMUNE, dal: {{ dal | tojson }}, al: {{ al | tojson }}, n: 10 });
+    fetch('/api/top_consumatori?' + q)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.utenze.length) {
+          corpo.innerHTML = '<tr><td colspan="8">Nessun dato per questo periodo.</td></tr>';
+          return;
+        }
+        corpo.innerHTML = d.utenze.map((u, i) => `
+          <tr>
+            <td class="num">${i + 1}</td>
+            <td class="num"><a href="/pagine/utenza?comune=${encodeURIComponent(COMUNE)}&codice_servizio=${u['Codice Servizio']}">${u['Codice Servizio']}</a></td>
+            <td>${u['Indirizzo'] ?? ''}</td>
+            <td>${u['Codice Distretto']}</td>
+            <td>${u["Classe d'uso"]}</td>
+            <td class="num">${fmt(u['Volume (m3)'], 2)}</td>
+            <td class="num">${fmt(u['Consumo Medio Stimato (m3/giorno)'], 2)}</td>
+            <td class="num">${fmt(u['Ritmo Reale Ultima Lettura (m3/giorno)'], 2)}</td>
+          </tr>`).join('');
+      });
+  })();
+  </script>
 {% else %}
-  <h1>Riepilogo</h1>
+  <h1>Volumi</h1>
   <p class="nota-metodologica">Scegli un comune dal filtro in alto per il dettaglio per distretto e mese. Sotto, un colpo d'occhio su tutti i comuni disponibili.</p>
+  {{ filtro_periodo(none) }}
   <div class="kpi-grid">
     {% for c in riepilogo_comuni %}
-    <a class="kpi" style="text-decoration:none;color:inherit;display:block" href="/pagine/riepilogo?comune={{ c.comune }}">
+    <a class="kpi" style="text-decoration:none;color:inherit;display:block" href="/pagine/riepilogo?comune={{ c.comune }}{% if dal %}&dal={{ dal }}{% endif %}{% if al %}&al={{ al }}{% endif %}">
       <div class="etichetta">{{ c.comune }}</div>
       <div class="valore">{{ "{:.0f}".format(c.volume_totale) }} m³</div>
     </a>
