@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+{% block titolo %}Prese — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Prese e distretti{% if comune %} — {{ comune }}{% endif %}</h1>
+<p class="nota-metodologica">
+  Neta H2O associa i distretti alle <strong>prese</strong>: qui ci sono quelle con distretto
+  <strong>NO DISTRETTO</strong>, <strong>*</strong> (non indicato) o <strong>di un altro comune</strong> non associabile,
+  da sistemare guardando la mappa. Il distretto proposto viene dalla posizione: quello in cui la presa cade, oppure
+  il più vicino entro {{ distanza_max }} m. Le conferme finiscono nel file Excel per Neta e <strong>non cambiano i
+  volumi</strong>: il distretto giusto entra nei calcoli quando Neta corregge il suo gestionale e arriva l'estrazione successiva.
+  Coordinate e distretto sono quelli dell'estrazione più recente di ogni servizio.
+</p>
+
+{% if ricostruzione.in_corso %}
+<div class="panel" style="border-color:var(--amber);background:var(--amber-bg)">
+  Sto ricostruendo l'anagrafica delle prese dai file già caricati ({{ ricostruzione.fatti }} di {{ ricostruzione.totale }}):
+  ci vuole qualche minuto, poi ricarica la pagina.
+</div>
+{% endif %}
+
+{% if not comune %}
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+    <h2 style="margin:0">Prese da sistemare, per comune</h2>
+    <a href="/prese/esporta">Scarica le conferme di tutti i comuni (Excel)</a>
+  </div>
+  <div class="table-scroll" style="max-height:none">
+    <table>
+      <thead><tr><th>Comune</th><th class="num">NO DISTRETTO</th><th class="num">*</th><th class="num">Altro comune</th>
+        <th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
+      <tbody>
+        {% for r in riepilogo %}
+        <tr>
+          <td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td>
+          <td class="num">{{ r.NODMA }}</td><td class="num">{{ r.ND }}</td><td class="num">{{ r.ALTRO }}</td>
+          <td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+
+<div class="sotto-tab" style="align-items:center;flex-wrap:wrap">
+  <a href="/pagine/prese?comune={{ comune | urlencode }}" class="{% if vista == 'assegnare' %}attivo{% endif %}">Da assegnare</a>
+  <a href="/pagine/prese?comune={{ comune | urlencode }}&vista=mappa" class="{% if vista == 'mappa' %}attivo{% endif %}">Mappa prese</a>
+  <span style="flex:1"></span>
+  <a href="/prese/esporta?comune={{ comune | urlencode }}">Excel conferme (per Neta)</a>
+  <a href="/prese/esporta?comune={{ comune | urlencode }}&tutte=1">Excel elenco completo</a>
+</div>
+
+{% if vista == 'assegnare' %}
+<div class="kpi-grid" id="kpi"></div>
+
+<div class="panel">
+  <div class="mappa-layout prese-layout">
+    <div>
+      <div id="mappa" class="mappa-prese"></div>
+      <div id="legenda" class="legenda-prese"></div>
+    </div>
+    <div>
+      <div class="filtri-prese">
+        <label><input type="checkbox" class="f-motivo" value="NODMA" checked> NO DISTRETTO</label>
+        <label><input type="checkbox" class="f-motivo" value="ND" checked> *</label>
+        <label><input type="checkbox" class="f-motivo" value="ALTRO" checked> Altro comune</label>
+        <select id="f-stato">
+          <option value="da_fare">Da confermare</option>
+          <option value="confermate">Confermate</option>
+          <option value="tutte">Tutte</option>
+        </select>
+        <input type="search" id="f-testo" placeholder="Cerca presa, servizio, indirizzo…">
+      </div>
+      {% if puo_modificare %}
+      <div class="azioni-prese">
+        <button type="button" class="btn-primario" id="conferma-proposte"></button>
+        <span class="nota-metodologica" style="margin:0">Seleziona una presa e fai clic su un distretto in mappa per assegnarglielo.</span>
+      </div>
+      {% endif %}
+      <div id="conteggio" class="nota-metodologica" style="margin:6px 0"></div>
+      <div id="elenco" class="elenco-prese"></div>
+    </div>
+  </div>
+</div>
+<datalist id="lista-distretti">
+  {% for d in distretti_comune %}<option value="{{ d }}">{{ nomi_distretti.get(d, '') }}</option>{% endfor %}
+  {% for d in distretti_tutti if d not in distretti_comune %}<option value="{{ d }}">{{ comuni_distretti.get(d, '') }}</option>{% endfor %}
+</datalist>
+
+{% else %}
+<div class="panel">
+  <p class="nota-metodologica" style="margin-bottom:10px">
+    {{ punti | length }} prese in mappa{% if n_senza_coord %}, {{ n_senza_coord }} senza coordinate valide (non mostrate){% endif %}.
+    Ogni puntino ha il colore del distretto della presa; i contorni sono i confini dei distretti.
+    Clic su un distretto della legenda per mostrare solo quello.
+  </p>
+  <div class="mappa-layout prese-layout">
+    <div><div id="mappa" class="mappa-prese"></div></div>
+    <div id="legenda-distretti" class="legenda-distretti"></div>
+  </div>
+</div>
+{% endif %}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  const COMUNE = {{ comune | tojson }};
+  const GEOJSON = {{ geojson | tojson }};
+  const DISTRETTI_COMUNE = new Set({{ distretti_comune | tojson }});
+  const NOMI = {{ nomi_distretti | tojson }};
+  const COMUNI_DISTRETTI = {{ comuni_distretti | tojson }};
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = n => Number(n).toLocaleString('it-IT');
+
+  const TEAL_DARK = '#0A5C63', GRIGIO = '#8B9DA6', ROSSO = '#B3261E', AMBRA = '#B9700B', VERDE = '#1C7C4C';
+
+  const mappa = L.map('mappa', { preferCanvas: true });
+  const baseMappa = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap', maxZoom: 20, maxNativeZoom: 19,
+  }).addTo(mappa);
+  const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Esri World Imagery', maxZoom: 20, maxNativeZoom: 19,
+  });
+  L.control.layers({ 'Mappa': baseMappa, 'Satellite': baseSatellite }, null, { position: 'topright' }).addTo(mappa);
+
+  // Etichette dei codici distretto: solo da vicino, altrimenti si sovrappongono.
+  const etichette = L.layerGroup();
+  function aggiornaEtichette() {
+    if (mappa.getZoom() >= 14) etichette.addTo(mappa); else etichette.remove();
+  }
+  mappa.on('zoomend', aggiornaEtichette);
+
+  function stratoDistretti(stile, alClic) {
+    return L.geoJSON(GEOJSON, {
+      style: stile,
+      onEachFeature: function (f, layer) {
+        const p = f.properties;
+        const altro = p.comune && p.comune !== COMUNE && !DISTRETTI_COMUNE.has(p.codice_distretto);
+        layer.bindTooltip(`<strong class="mono">${esc(p.codice_distretto)}</strong> ${esc(p.nome_distretto)}` +
+          (altro ? `<br><em>${esc(p.comune)}</em>` : ''), { sticky: true, className: 'tooltip-distretto' });
+        L.tooltip({ permanent: true, direction: 'center', className: 'etichetta-distretto', interactive: false })
+          .setLatLng(layer.getBounds().getCenter()).setContent(esc(p.codice_distretto)).addTo(etichette);
+        if (alClic) layer.on('click', e => alClic(p.codice_distretto, e));
+      },
+    }).addTo(mappa);
+  }
+
+  function inquadra(punti, strato) {
+    if (punti.length) {
+      mappa.fitBounds(L.latLngBounds(punti.map(p => [p.LAT, p.LON])), { padding: [24, 24] });
+    } else if (strato && strato.getLayers().length) {
+      mappa.fitBounds(strato.getBounds());
+    } else {
+      mappa.setView([45.15, 9.0], 11);
+    }
+    aggiornaEtichette();
+  }
+
+{% if vista == 'assegnare' %}
+  const RIGHE = {{ righe | tojson }};
+  const PUO_MODIFICARE = {{ puo_modificare | tojson }};
+  const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune' };
+  const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA };
+  const perChiave = new Map(RIGHE.map(r => [r.CHIAVE, r]));
+  let selezionata = null;
+
+  const colore = r => r.CONFERMATO ? VERDE : (COLORE_MOTIVO[r.MOTIVO] || GRIGIO);
+
+  const distretti = stratoDistretti(f => DISTRETTI_COMUNE.has(f.properties.codice_distretto)
+      ? { color: TEAL_DARK, weight: 2, fillColor: '#0E7C86', fillOpacity: 0.08 }
+      : { color: '#6B7F8A', weight: 1.2, dashArray: '4 4', fillColor: '#6B7F8A', fillOpacity: 0.04 },
+    function (codice) {
+      // Metodo "visivo": presa selezionata + clic sul distretto = distretto proposto nella casella.
+      if (!selezionata || !PUO_MODIFICARE) return;
+      const campo = document.querySelector(`.riga-presa[data-chiave="${CSS.escape(selezionata)}"] input.campo-distretto`);
+      if (campo) { campo.value = codice; campo.classList.add('lampeggia'); setTimeout(() => campo.classList.remove('lampeggia'), 600); campo.focus(); }
+    });
+
+  const marcatori = new Map();
+  RIGHE.forEach(function (r) {
+    if (!r.COORD_VALIDE) return;
+    const m = L.circleMarker([r.LAT, r.LON], { radius: 6, weight: 1.5, color: '#fff', fillColor: colore(r), fillOpacity: 0.95 });
+    m.bindTooltip(() => `<strong class="mono">${esc(r.DP || 'servizio ' + r.SERVIZI)}</strong><br>${esc(r.INDIRIZZO)}<br>` +
+      `Attuale: ${esc(r.DISTRETTO)}` + (r.PROPOSTA ? ` · proposta ${esc(r.PROPOSTA)}` : '') +
+      (r.CONFERMATO ? `<br>Confermato: <strong>${esc(r.CONFERMATO)}</strong>` : ''), { className: 'tooltip-distretto' });
+    m.on('click', () => seleziona(r.CHIAVE, true));
+    marcatori.set(r.CHIAVE, m);
+  });
+  const stratoPunti = L.featureGroup([...marcatori.values()]).addTo(mappa);
+
+  function aggiornaMarcatore(r) {
+    const m = marcatori.get(r.CHIAVE);
+    if (!m) return;
+    const sel = r.CHIAVE === selezionata;
+    m.setStyle({ fillColor: colore(r), radius: sel ? 10 : 6, color: sel ? '#0F2438' : '#fff', weight: sel ? 3 : 1.5 });
+    if (sel) m.bringToFront();
+  }
+
+  document.getElementById('legenda').innerHTML = [
+    [GRIGIO, 'NO DISTRETTO'], [ROSSO, '* (non indicato)'], [AMBRA, 'Distretto di altro comune'], [VERDE, 'Confermata'],
+  ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') +
+    '<span><i style="border:2px solid #0A5C63;background:none"></i>Distretti del comune</span>' +
+    '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
+
+  function kpi() {
+    const aperte = RIGHE.filter(r => r.MOTIVO);
+    const conta = m => aperte.filter(r => r.MOTIVO === m).length;
+    const card = (etichetta, valore, classe) => `<div class="kpi ${classe || ''}"><div class="etichetta">${etichetta}</div><div class="valore">${fmt(valore)}</div></div>`;
+    document.getElementById('kpi').innerHTML =
+      card('NO DISTRETTO', conta('NODMA')) + card('Distretto *', conta('ND'), conta('ND') ? 'danger' : '') +
+      card('Di altro comune', conta('ALTRO'), conta('ALTRO') ? 'warn' : '') +
+      card('Confermate', RIGHE.filter(r => r.CONFERMATO).length) +
+      card('Senza coordinate valide', RIGHE.filter(r => !r.COORD_VALIDE).length);
+  }
+
+  function testoProposta(r) {
+    if (!r.COORD_VALIDE) return '<span class="badge nodata">coordinate non valide</span>';
+    if (!r.PROPOSTA) return `<span class="testo-tenue">nessun distretto entro {{ distanza_max }} m</span>`;
+    const dove = r.DISTANZA_M == null ? 'dentro il confine' : `fuori, a ${r.DISTANZA_M} m`;
+    const altro = COMUNI_DISTRETTI[r.PROPOSTA] && COMUNI_DISTRETTI[r.PROPOSTA] !== COMUNE && !DISTRETTI_COMUNE.has(r.PROPOSTA)
+      ? ` <span class="badge stimato">${esc(COMUNI_DISTRETTI[r.PROPOSTA])}</span>` : '';
+    return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">${dove}</span>${altro}`;
+  }
+
+  function htmlRiga(r) {
+    const conferma = r.CONFERMATO
+      ? `<div class="confermato">✓ <strong class="mono">${esc(r.CONFERMATO)}</strong>
+           <span class="testo-tenue">${esc(r.CONFERMATO_DA || '')} ${esc((r.CONFERMATO_IL || '').slice(0, 10))}</span>
+           ${r.RECEPITO ? '<span class="badge real">recepito da Neta</span>' : ''}
+           ${PUO_MODIFICARE ? '<button type="button" class="btn-link pericolo azione-togli">togli</button>' : ''}</div>`
+      : '';
+    const modulo = PUO_MODIFICARE && !r.CONFERMATO
+      ? `<div class="modulo-assegna">
+           <input class="campo-distretto mono" list="lista-distretti" value="${esc(r.PROPOSTA || '')}" placeholder="Distretto" size="9">
+           <button type="button" class="btn-primario azione-conferma">Conferma</button>
+         </div>` : '';
+    return `<div class="riga-presa${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
+      <div class="riga-testa">
+        <span class="mono">${r.DP ? esc(r.DP) : 'senza presa'}</span>
+        <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || 'sistemata')}</span>
+        <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
+      </div>
+      <div>${esc(r.INDIRIZZO)}</div>
+      <div class="testo-tenue">${r.N_SERVIZI === 1 ? 'Servizio' : r.N_SERVIZI + ' servizi'}: <span class="mono">${esc(r.SERVIZI)}</span></div>
+      <div>${testoProposta(r)}</div>
+      ${conferma}${modulo}
+    </div>`;
+  }
+
+  function visibili() {
+    const motivi = new Set([...document.querySelectorAll('.f-motivo:checked')].map(c => c.value));
+    const stato = document.getElementById('f-stato').value;
+    const testo = document.getElementById('f-testo').value.trim().toLowerCase();
+    return RIGHE.filter(r =>
+      (!r.MOTIVO || motivi.has(r.MOTIVO)) &&
+      (stato === 'tutte' || (stato === 'confermate') === !!r.CONFERMATO) &&
+      (!testo || [r.DP, r.SERVIZI, r.INDIRIZZO, r.DISTRETTO, r.PROPOSTA].join(' ').toLowerCase().includes(testo)));
+  }
+
+  function disegna() {
+    const righe = visibili();
+    const chiavi = new Set(righe.map(r => r.CHIAVE));
+    const elenco = document.getElementById('elenco');
+    elenco.innerHTML = righe.map(htmlRiga).join('') || '<p class="testo-tenue">Nessuna presa con questi filtri.</p>';
+    marcatori.forEach((m, k) => { if (chiavi.has(k)) stratoPunti.addLayer(m); else stratoPunti.removeLayer(m); });
+    RIGHE.forEach(aggiornaMarcatore);
+    document.getElementById('conteggio').textContent = `${fmt(righe.length)} prese nell'elenco`;
+    const bottone = document.getElementById('conferma-proposte');
+    if (bottone) {
+      const n = righe.filter(r => !r.CONFERMATO && r.PROPOSTA && r.DISTANZA_M == null).length;
+      bottone.textContent = `Conferma le proposte "dentro il confine" (${fmt(n)})`;
+      bottone.disabled = n === 0;
+    }
+    kpi();
+  }
+
+  function seleziona(chiave, daMappa) {
+    selezionata = chiave;
+    document.querySelectorAll('.riga-presa').forEach(el => el.classList.toggle('selezionata', el.dataset.chiave === chiave));
+    RIGHE.forEach(aggiornaMarcatore);
+    const el = document.querySelector(`.riga-presa[data-chiave="${CSS.escape(chiave)}"]`);
+    if (daMappa && el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const m = marcatori.get(chiave);
+    if (!daMappa && m) mappa.setView(m.getLatLng(), Math.max(mappa.getZoom(), 17));
+  }
+
+  async function invia(voci) {
+    const risposta = await fetch('/prese/assegna', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comune: COMUNE, voci: voci }),
+    });
+    if (!risposta.ok) {
+      let msg = 'Salvataggio non riuscito';
+      try { msg = (await risposta.json()).detail || msg; } catch (e) {}
+      alert(msg);
+      return false;
+    }
+    const adesso = new Date();
+    const oggi = adesso.getFullYear() + '-' + String(adesso.getMonth() + 1).padStart(2, '0') + '-' + String(adesso.getDate()).padStart(2, '0');
+    voci.forEach(v => {
+      const r = perChiave.get(v.chiave);
+      r.CONFERMATO = v.distretto || null;
+      r.CONFERMATO_DA = v.distretto ? {{ request.state.utente.username | tojson }} : null;
+      r.CONFERMATO_IL = v.distretto ? oggi : null;
+      r.RECEPITO = !!v.distretto && r.DISTRETTO === v.distretto;
+    });
+    disegna();
+    return true;
+  }
+
+  document.getElementById('elenco').addEventListener('click', function (e) {
+    const riga = e.target.closest('.riga-presa');
+    if (!riga) return;
+    const chiave = riga.dataset.chiave;
+    if (e.target.classList.contains('azione-conferma')) {
+      const valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
+      if (!valore) { alert('Scrivi o scegli un distretto.'); return; }
+      invia([{ chiave: chiave, distretto: valore }]);
+    } else if (e.target.classList.contains('azione-togli')) {
+      invia([{ chiave: chiave, distretto: '' }]);
+    } else if (e.target.tagName !== 'INPUT') {
+      seleziona(chiave, false);
+    }
+  });
+  document.getElementById('elenco').addEventListener('focusin', function (e) {
+    const riga = e.target.closest('.riga-presa');
+    if (riga && riga.dataset.chiave !== selezionata) seleziona(riga.dataset.chiave, false);
+  });
+  document.getElementById('elenco').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.classList.contains('campo-distretto')) {
+      e.target.closest('.riga-presa').querySelector('.azione-conferma').click();
+    }
+  });
+  const bottone = document.getElementById('conferma-proposte');
+  if (bottone) bottone.addEventListener('click', function () {
+    const voci = visibili().filter(r => !r.CONFERMATO && r.PROPOSTA && r.DISTANZA_M == null)
+      .map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
+    if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese che cadono dentro un confine?`)) invia(voci);
+  });
+  document.querySelectorAll('.f-motivo, #f-stato').forEach(el => el.addEventListener('change', disegna));
+  document.getElementById('f-testo').addEventListener('input', disegna);
+
+  disegna();
+  inquadra(RIGHE.filter(r => r.COORD_VALIDE), distretti);
+
+{% else %}
+  const PUNTI = {{ punti | tojson }}.map(a => ({ DP: a[0], INDIRIZZO: a[1], SERVIZI: a[2], N_SERVIZI: a[3],
+    DISTRETTO: a[4], DISTRETTO_PRINCIPALE: a[5], MOTIVO: a[6], LAT: a[7], LON: a[8] }));
+  // Palette categorica: un colore per distretto, ordine fisso per codice.
+  const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948',
+                   '#0E7C86', '#8a5a2b', '#6d8f00', '#b0369a', '#3d5a80', '#c08000', '#5aa9e6', '#7a4ea3'];
+  const speciale = { 'NO DISTRETTO': GRIGIO, '*': '#0F2438' };
+  const codiciPunti = [...new Set(PUNTI.map(p => p.DISTRETTO_PRINCIPALE))].filter(c => !speciale[c] && !c.toUpperCase().startsWith('NO'));
+  const codiciConfini = GEOJSON.features.map(f => f.properties.codice_distretto).filter(c => DISTRETTI_COMUNE.has(c));
+  const codici = [...new Set([...codiciPunti, ...codiciConfini])].sort();
+  const COLORI = Object.fromEntries(codici.map((c, i) => [c, PALETTE[i % PALETTE.length]]));
+  const coloreDi = c => speciale[c] || (c.toUpperCase().startsWith('NO') ? GRIGIO : COLORI[c] || '#6B7F8A');
+  let filtro = null;
+
+  const distretti = stratoDistretti(f => {
+    const c = f.properties.codice_distretto;
+    const mio = c in COLORI;
+    return { color: mio ? COLORI[c] : '#6B7F8A', weight: mio ? 2.2 : 1, dashArray: mio ? null : '4 4',
+             fillColor: mio ? COLORI[c] : '#6B7F8A', fillOpacity: mio ? 0.07 : 0.03 };
+  });
+
+  const perDistretto = {};
+  PUNTI.forEach(function (p) {
+    const c = p.DISTRETTO_PRINCIPALE;
+    const m = L.circleMarker([p.LAT, p.LON], {
+      radius: 4, weight: p.MOTIVO === 'ALTRO' ? 2 : 0.6, color: p.MOTIVO === 'ALTRO' ? ROSSO : '#fff',
+      fillColor: coloreDi(c), fillOpacity: 0.9,
+    });
+    m.bindPopup(() => `<strong class="mono">${esc(p.DP || 'servizio senza presa')}</strong><br>${esc(p.INDIRIZZO)}<br>` +
+      `Distretto: <strong class="mono">${esc(p.DISTRETTO)}</strong>` + (p.MOTIVO === 'ALTRO' ? ' <em>(di altro comune)</em>' : '') +
+      `<br>${p.N_SERVIZI === 1 ? 'Servizio' : p.N_SERVIZI + ' servizi'}: <span class="mono">${esc(p.SERVIZI)}</span>`);
+    (perDistretto[c] = perDistretto[c] || { marcatori: [], n: 0 }).marcatori.push(m);
+    perDistretto[c].n += 1;
+  });
+  const gruppi = Object.fromEntries(Object.entries(perDistretto).map(([c, v]) => [c, L.layerGroup(v.marcatori).addTo(mappa)]));
+
+  function disegnaLegenda() {
+    const voci = Object.keys(perDistretto).sort((a, b) => (a in COLORI) - (b in COLORI) || a.localeCompare(b)).reverse();
+    document.getElementById('legenda-distretti').innerHTML =
+      '<table><thead><tr><th>Distretto</th><th class="num">Prese</th></tr></thead><tbody>' +
+      voci.map(c => `<tr class="voce-legenda${filtro === c ? ' attiva' : ''}${filtro && filtro !== c ? ' spenta' : ''}" data-codice="${esc(c)}">
+        <td><i style="background:${coloreDi(c)}"></i><span class="mono">${esc(c)}</span>
+          <span class="testo-tenue">${esc(NOMI[c] && NOMI[c] !== c ? NOMI[c] : '')}</span></td>
+        <td class="num">${fmt(perDistretto[c].n)}</td></tr>`).join('') +
+      '</tbody></table><p class="nota-metodologica" style="margin-top:8px">Bordo rosso = presa con distretto di un altro comune.</p>';
+  }
+  document.getElementById('legenda-distretti').addEventListener('click', function (e) {
+    const voce = e.target.closest('.voce-legenda');
+    if (!voce) return;
+    filtro = filtro === voce.dataset.codice ? null : voce.dataset.codice;
+    Object.entries(gruppi).forEach(([c, g]) => { if (!filtro || c === filtro) g.addTo(mappa); else g.remove(); });
+    if (filtro) {
+      const b = L.latLngBounds(perDistretto[filtro].marcatori.map(m => m.getLatLng()));
+      if (b.isValid()) mappa.fitBounds(b, { padding: [30, 30], maxZoom: 17 });
+    }
+    disegnaLegenda();
+  });
+  disegnaLegenda();
+  inquadra(PUNTI, distretti);
+{% endif %}
+})();
+</script>
+{% endif %}
+{% endblock %}

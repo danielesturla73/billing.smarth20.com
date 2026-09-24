@@ -442,3 +442,44 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
 /* Portata media equivalente (l/s) sotto il valore dei KPI. */
 .kpi .sotto-valore { font-family: var(--mono); font-size: 13px; color: var(--teal-dark); margin-top: 4px; }
 .kpi .sotto-valore span { font-family: var(--font); font-size: 11px; color: var(--text-2); }
+
+/* Prese: mappa a sinistra, elenco da assegnare (o legenda distretti) a destra. */
+.prese-layout { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .prese-layout { grid-template-columns: 1fr; } }
+.mappa-prese { height: 680px; border-radius: 10px; overflow: hidden; }
+@media (max-width: 900px) { .mappa-prese { height: 420px; } }
+.mono { font-family: var(--mono); }
+.testo-tenue { color: var(--text-2); font-size: 12px; }
+.legenda-prese { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 12px; color: var(--text-2); }
+.legenda-prese span { display: inline-flex; align-items: center; gap: 6px; }
+.legenda-prese i, .legenda-distretti i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+.filtri-prese { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 13px; margin-bottom: 10px; }
+.filtri-prese label { display: inline-flex; align-items: center; gap: 4px; }
+.filtri-prese select, .filtri-prese input[type=search], .modulo-assegna input {
+  border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 10px; font: inherit; background: var(--surface); color: var(--text);
+}
+.filtri-prese input[type=search] { flex: 1; min-width: 180px; }
+.azioni-prese { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 4px; }
+.azioni-prese .btn-primario:disabled { background: var(--border-strong); cursor: default; }
+.elenco-prese { max-height: 560px; overflow-y: auto; border-top: 1px solid var(--border); }
+.riga-presa { padding: 10px 8px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; display: grid; gap: 2px; }
+.riga-presa:hover { background: var(--surface-2); }
+.riga-presa.selezionata { background: var(--teal-light); box-shadow: inset 3px 0 0 var(--teal); }
+.riga-testa { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.riga-testa .mono { font-weight: 600; }
+.modulo-assegna { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.modulo-assegna .btn-primario { padding: 6px 12px; }
+.confermato { color: var(--green); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lampeggia { outline: 3px solid var(--amber); }
+.legenda-distretti { max-height: 680px; overflow-y: auto; font-size: 12.5px; }
+.legenda-distretti td { padding: 5px 6px; }
+.legenda-distretti td:first-child { display: flex; align-items: center; gap: 8px; }
+.voce-legenda { cursor: pointer; }
+.voce-legenda.attiva { background: var(--teal-light); }
+.voce-legenda.spenta { opacity: .45; }
+.leaflet-tooltip.etichetta-distretto {
+  background: rgba(255,255,255,.8); border: none; box-shadow: none; padding: 0 4px;
+  font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--ink);
+}
+.leaflet-tooltip.etichetta-distretto::before { display: none; }
+.leaflet-container { font-family: var(--font); }

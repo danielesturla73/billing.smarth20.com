@@ -34,13 +34,13 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, auth, database, motore_calcolo
+from app import accessi, auth, database, motore_calcolo, prese
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -175,6 +175,9 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
             continue
 
         comune = motore_calcolo.comune_dominante(df) or "SCONOSCIUTO"
+        # Anagrafica delle prese (coordinate/distretto dell'ultima estrazione,
+        # vedi app/prese.py): dal file intero, prima della deduplica letture.
+        prese.aggiorna_anagrafica(df, percorso_salvato.name)
         risultati_file.append({
             "file": nome_originale,
             "salvato_come": percorso_salvato.name,
@@ -451,6 +454,8 @@ def _precalcola_risultati():
     """Scalda la cache in background all'avvio, cosi' anche la prima
     visita dopo un riavvio/deploy e' veloce (non blocca l'avvio)."""
     threading.Thread(target=lambda: list(_risultati_per_comune(None)), daemon=True).start()
+    # Primo avvio con il tab Prese: anagrafica ricostruita dai file gia' caricati.
+    prese.avvia_ricostruzione_se_serve()
 
 
 @app.get("/riepilogo")
@@ -1391,3 +1396,121 @@ def pagina_comune(request: Request, comune: str, distretto: str | None = None, c
         "stato_chiusura": _tabella_json(risultato.stato_chiusura_mesi),
         "mesi_disponibili": mesi_disponibili,
     })
+
+
+# ---------------------------------------------------------------------------
+# Prese da associare a un distretto (tab "Prese", Daniele 24/09/2026) — la
+# logica e' in app/prese.py. Le conferme servono solo al file per Neta: non
+# toccano Metodo B ne' Import_WMS.
+# ---------------------------------------------------------------------------
+
+def _punti_json(df: pd.DataFrame, colonne: list[str]) -> list[dict]:
+    return _tabella_json(df[colonne]) if not df.empty else []
+
+
+@app.get("/pagine/prese")
+def pagina_prese(request: Request, comune: str | None = None, vista: str = "assegnare"):
+    """Senza comune: conteggi per comune. Con comune: vista "assegnare"
+    (mappa + elenco delle prese NODMA / * / di altro comune, con proposta
+    dalla posizione e conferma) o vista "mappa" (tutte le prese del comune,
+    un puntino del colore del suo distretto)."""
+    comuni_disponibili = _comuni_disponibili()
+    contesto = {
+        "request": request,
+        "pagina_attiva": "prese",
+        "comuni_disponibili": comuni_disponibili,
+        "comune_selezionato": comune,
+        "comune": None,
+        "vista": "mappa" if vista == "mappa" else "assegnare",
+        "ricostruzione": dict(prese.STATO_RICOSTRUZIONE),
+        "distanza_max": prese.DISTANZA_MAX_PROPOSTA_M,
+    }
+    if not comune:
+        contesto["riepilogo"] = [] if contesto["ricostruzione"]["in_corso"] else prese.riepilogo_comuni(comuni_disponibili)
+        return templates.TemplateResponse(request, "prese.html", contesto)
+
+    trovato = next((c for c in comuni_disponibili if c.strip().upper() == comune.strip().upper()), None)
+    if not trovato:
+        raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
+    contesto.update(comune=trovato, comune_selezionato=trovato)
+
+    tutte = prese.prese_comune(trovato)
+    validi = tutte[tutte["COORD_VALIDE"]] if not tutte.empty else tutte
+    if validi.empty:
+        geojson = {"type": "FeatureCollection", "features": []}
+    else:
+        geojson = prese.geojson_attorno(validi["LAT"].min(), validi["LAT"].max(), validi["LON"].min(), validi["LON"].max())
+    elenco = motore_calcolo.carica_mappa_distretti_df()
+    del_comune = elenco[
+        (elenco["comune_ufficiale"] == trovato)
+        | elenco["comuni_associabili"].str.split(";").apply(lambda l: trovato in [c.strip() for c in l])
+    ]
+    contesto.update(
+        geojson=geojson,
+        distretti_comune=sorted(del_comune["codice_distretto"]),
+        distretti_tutti=sorted(prese.distretti_noti()),
+        nomi_distretti=dict(zip(elenco["codice_distretto"], elenco["nome_distretto"])),
+        comuni_distretti=dict(zip(elenco["codice_distretto"], elenco["comune_ufficiale"])),
+        puo_modificare=request.state.utente["ruolo"] in ("editor", "admin"),
+    )
+    if contesto["vista"] == "mappa":
+        # Array compatti (non dict con i nomi dei campi): Voghera ha ~9.000
+        # prese e la pagina pesava 2,7 MB. Ordine: vedi PUNTI in prese.html.
+        contesto["punti"] = [
+            [r.DP, r.INDIRIZZO, r.SERVIZI, r.N_SERVIZI, r.DISTRETTO, r.DISTRETTO_PRINCIPALE, r.MOTIVO,
+             round(float(r.LAT), 6), round(float(r.LON), 6)]
+            for r in validi.itertuples(index=False)
+        ]
+        contesto["n_totale"] = len(tutte)
+        contesto["n_senza_coord"] = len(tutte) - len(validi)
+    else:
+        da_fare = prese.prese_da_assegnare(trovato)
+        contesto["righe"] = _punti_json(da_fare, [
+            "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
+            "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
+            "CONFERMATO_IL", "RECEPITO",
+        ])
+    return templates.TemplateResponse(request, "prese.html", contesto)
+
+
+@app.post("/prese/assegna")
+async def prese_assegna(request: Request):
+    """Conferma (o toglie, con distretto vuoto) il distretto di una o piu'
+    prese: JSON {"comune": ..., "voci": [{"chiave": ..., "distretto": ...}]}.
+    Solo editor/admin (middleware: ogni POST)."""
+    corpo = await request.json()
+    comune = str(corpo.get("comune", "")).strip()
+    voci = [(str(v.get("chiave", "")).strip(), str(v.get("distretto", ""))) for v in corpo.get("voci", [])]
+    voci = [v for v in voci if v[0]]
+    if not comune or not voci:
+        raise HTTPException(status_code=400, detail="Comune o prese mancanti.")
+    try:
+        salvate, tolte = prese.salva_assegnazioni(comune, voci, request.state.utente["username"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    dettaglio = ", ".join(f"{k}→{d.strip().upper() or '(tolta)'}" for k, d in voci[:20])
+    if len(voci) > 20:
+        dettaglio += f" … (+{len(voci) - 20})"
+    auth.registra(
+        request.state.utente["username"], "prese_assegna",
+        f"{comune}: {salvate} confermate, {tolte} tolte — {dettaglio}", accessi.ip_client(request),
+    )
+    return {"salvate": salvate, "tolte": tolte}
+
+
+@app.get("/prese/esporta")
+def prese_esporta(request: Request, comune: str = "", tutte: int = 0):
+    """Excel una riga per presa. Di default solo le conferme (il file per
+    Neta); ?tutte=1 l'elenco completo con le proposte. Senza comune: tutti."""
+    comuni = [comune.strip().upper()] if comune else _comuni_disponibili()
+    contenuto = prese.esporta_excel(comuni, solo_confermate=not tutte)
+    nome = f"prese_{'elenco' if tutte else 'distretti_confermati'}_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.xlsx"
+    auth.registra(
+        request.state.utente["username"], "prese_esporta",
+        f"{comune or 'tutti i comuni'} ({'elenco completo' if tutte else 'confermate'})", accessi.ip_client(request),
+    )
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )

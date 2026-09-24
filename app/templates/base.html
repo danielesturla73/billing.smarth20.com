@@ -14,8 +14,9 @@
     {% if request.state.utente %}
     {# Filtro Comune solo dove cambia qualcosa (Daniele, 21/09/2026): pagine per comune e Distretti;
        la pagina del comune ha pagina_attiva 'mappa' come la Home, ma passa "comune". #}
-    {% if not senza_filtro_comune and (pagina_attiva in ('riepilogo', 'diagnostica', 'distretti') or (pagina_attiva == 'mappa' and comune)) %}
+    {% if not senza_filtro_comune and (pagina_attiva in ('riepilogo', 'diagnostica', 'prese', 'distretti') or (pagina_attiva == 'mappa' and comune)) %}
     <form class="filtri" method="get">
+      {% if pagina_attiva == 'prese' and vista %}<input type="hidden" name="vista" value="{{ vista }}">{% endif %}
       <label for="comune">Comune</label>
       <select id="comune" name="comune" onchange="this.form.submit()">
         <option value="" {% if not comune_selezionato %}selected{% endif %}>Tutti</option>
@@ -47,6 +48,8 @@
        class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Volumi</a>
     <a href="/pagine/diagnostica{{ q }}"
        class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica</a>
+    <a href="/pagine/prese{{ q }}"
+       class="{% if pagina_attiva == 'prese' %}attivo{% endif %}">Prese</a>
     <span class="sep" aria-hidden="true"></span>
     <a href="/pagine/distretti{{ q }}"
        class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
