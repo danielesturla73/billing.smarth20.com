@@ -1411,7 +1411,8 @@ def _punti_json(df: pd.DataFrame, colonne: list[str]) -> list[dict]:
 @app.get("/pagine/prese")
 def pagina_prese(request: Request, comune: str | None = None, vista: str = "assegnare"):
     """Senza comune: conteggi per comune. Con comune: vista "assegnare"
-    (mappa + elenco delle prese NODMA / * / di altro comune, con proposta
+    (mappa + elenco delle prese NODMA / * / di altro comune / con distretto
+    che non torna con la posizione, con proposta
     dalla posizione e conferma) o vista "mappa" (tutte le prese del comune,
     un puntino del colore del suo distretto)."""
     comuni_disponibili = _comuni_disponibili()

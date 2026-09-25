@@ -27,13 +27,13 @@
   <div class="table-scroll" style="max-height:none">
     <table>
       <thead><tr><th>Comune</th><th class="num">NO DISTRETTO</th><th class="num">*</th><th class="num">Altro comune</th>
-        <th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
+        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
       <tbody>
         {% for r in riepilogo %}
         <tr>
           <td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td>
           <td class="num">{{ r.NODMA }}</td><td class="num">{{ r.ND }}</td><td class="num">{{ r.ALTRO }}</td>
-          <td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
+          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -64,6 +64,8 @@
         <label><input type="checkbox" class="f-motivo" value="NODMA" checked> NO DISTRETTO</label>
         <label><input type="checkbox" class="f-motivo" value="ND" checked> *</label>
         <label><input type="checkbox" class="f-motivo" value="ALTRO" checked> Altro comune</label>
+        <label><input type="checkbox" class="f-motivo" value="POSIZIONE" checked> Diverso dalla posizione</label>
+        <label><input type="checkbox" class="f-motivo" value="FUSO" checked> Distretto soppresso</label>
         <select id="f-stato">
           <option value="da_fare">Da confermare</option>
           <option value="confermate">Confermate</option>
@@ -113,7 +115,7 @@
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = n => Number(n).toLocaleString('it-IT');
 
-  const TEAL_DARK = '#0A5C63', GRIGIO = '#8B9DA6', ROSSO = '#B3261E', AMBRA = '#B9700B', VERDE = '#1C7C4C';
+  const TEAL_DARK = '#0A5C63', GRIGIO = '#8B9DA6', ROSSO = '#B3261E', AMBRA = '#B9700B', VERDE = '#1C7C4C', VIOLA = '#6A4FB3', BLU = '#2F6FB0';
 
   const mappa = L.map('mappa', { preferCanvas: true });
   const baseMappa = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -160,8 +162,8 @@
 {% if vista == 'assegnare' %}
   const RIGHE = {{ righe | tojson }};
   const PUO_MODIFICARE = {{ puo_modificare | tojson }};
-  const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune' };
-  const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA };
+  const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune', POSIZIONE: 'Diverso dalla posizione', FUSO: 'Distretto soppresso' };
+  const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA, POSIZIONE: VIOLA, FUSO: BLU };
   const perChiave = new Map(RIGHE.map(r => [r.CHIAVE, r]));
   let selezionata = null;
 
@@ -198,7 +200,8 @@
   }
 
   document.getElementById('legenda').innerHTML = [
-    [GRIGIO, 'NO DISTRETTO'], [ROSSO, '* (non indicato)'], [AMBRA, 'Distretto di altro comune'], [VERDE, 'Confermata'],
+    [GRIGIO, 'NO DISTRETTO'], [ROSSO, '* (non indicato)'], [AMBRA, 'Distretto di altro comune'],
+    [VIOLA, 'Distretto diverso dalla posizione'], [BLU, 'Distretto soppresso (fuso)'], [VERDE, 'Confermata'],
   ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') +
     '<span><i style="border:2px solid #0A5C63;background:none"></i>Distretti del comune</span>' +
     '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
@@ -210,6 +213,8 @@
     document.getElementById('kpi').innerHTML =
       card('NO DISTRETTO', conta('NODMA')) + card('Distretto *', conta('ND'), conta('ND') ? 'danger' : '') +
       card('Di altro comune', conta('ALTRO'), conta('ALTRO') ? 'warn' : '') +
+      card('Diverso dalla posizione', conta('POSIZIONE')) +
+      card('Distretto soppresso', conta('FUSO')) +
       card('Confermate', RIGHE.filter(r => r.CONFERMATO).length) +
       card('Senza coordinate valide', RIGHE.filter(r => !r.COORD_VALIDE).length);
   }
@@ -224,13 +229,15 @@
   }
 
   function htmlRiga(r) {
+    // Distretto fuso: associata in automatico, si puo' solo scegliere un altro distretto.
+    const automatica = r.CONFERMATO_DA === 'automatico (distretto fuso)';
     const conferma = r.CONFERMATO
       ? `<div class="confermato">✓ <strong class="mono">${esc(r.CONFERMATO)}</strong>
            <span class="testo-tenue">${esc(r.CONFERMATO_DA || '')} ${esc((r.CONFERMATO_IL || '').slice(0, 10))}</span>
            ${r.RECEPITO ? '<span class="badge real">recepito da Neta</span>' : ''}
-           ${PUO_MODIFICARE ? '<button type="button" class="btn-link pericolo azione-togli">togli</button>' : ''}</div>`
+           ${PUO_MODIFICARE && !automatica ? '<button type="button" class="btn-link pericolo azione-togli">togli</button>' : ''}</div>`
       : '';
-    const modulo = PUO_MODIFICARE && !r.CONFERMATO
+    const modulo = PUO_MODIFICARE && (!r.CONFERMATO || automatica)
       ? `<div class="modulo-assegna">
            <input class="campo-distretto mono" list="lista-distretti" value="${esc(r.PROPOSTA || '')}" placeholder="Distretto" size="9">
            <button type="button" class="btn-primario azione-conferma">Conferma</button>

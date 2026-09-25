@@ -64,6 +64,20 @@ PERCORSO_MAPPA_DISTRETTI = Path("project_docs/distretti_comuni.csv")
 # — vedi importa_confini_distretti.
 PERCORSO_CONFINI_DISTRETTI = Path("project_docs/distretti_confini.geojson")
 
+# Distretti soppressi, fusi in un altro (Daniele, 25/09/2026): in WMS
+# SmartH2O non esistono piu' e non hanno un confine. Finche' Neta non
+# corregge il CRM le estrazioni li riportano ancora: unisci_distretti_fusi
+# li porta sul distretto nuovo prima di ogni calcolo, anche per i mesi
+# passati, cosi' Import_WMS ha solo i codici attuali. L'archivio tiene il
+# codice originale; il tab Prese li mostra come "Distretto soppresso" per il
+# file da mandare a Neta.
+DISTRETTI_FUSI = {
+    "DVH02": "DVH05",
+    "DVH03": "DVH05",
+    "DCT04": "DCT13",
+    "DCT07": "DCT13",  # DCT13 = DCT04 + DCT07 (Daniele, 25/09/2026)
+}
+
 COLONNE_ATTESE = [
     "CODICE_SERVIZIO", "LEGAMI_FORNITURA", "PRODOTTO_CODICE",
     "INDIRIZZO_UBICAZIONE", "CAP_UBICAZIONE", "LOCALITA", "STATO_SERVIZIO",
@@ -2003,6 +2017,19 @@ def elabora_file(paths: list[str | Path]) -> RisultatoElaborazione:
     return elabora_dataframe(df_grezzo)
 
 
+def unisci_distretti_fusi(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Sostituisce i codici dei distretti soppressi (DISTRETTI_FUSI) con
+    quello del distretto in cui sono stati fusi. Restituisce il DataFrame e
+    quante righe sono state spostate per codice vecchio."""
+    codici = df["DISTRETTO"].astype(str).str.strip().str.upper()
+    fusi = codici.isin(DISTRETTI_FUSI)
+    if not fusi.any():
+        return df, {}
+    df = df.copy()
+    df.loc[fusi, "DISTRETTO"] = codici[fusi].map(DISTRETTI_FUSI)
+    return df, codici[fusi].value_counts().to_dict()
+
+
 def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
     """Come elabora_file, ma parte da un DataFrame già caricato (es.
     l'archivio storico) invece che da percorsi di file su disco.
@@ -2011,6 +2038,14 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
     riepilogo_righe = []
     grezzi = []
     distretti_visti_per_file = []  # indice allineato a riepilogo_righe/grezzi
+
+    df_grezzo, spostate = unisci_distretti_fusi(df_grezzo)
+    if spostate:
+        warning.append(
+            "Distretti soppressi uniti al distretto nuovo: "
+            + ", ".join(f"{vecchio} -> {DISTRETTI_FUSI[vecchio]} ({n} righe)" for vecchio, n in sorted(spostate.items()))
+            + ". Neta non ha ancora aggiornato il CRM: vedi il tab Prese per il file da mandare."
+        )
 
     for nome_file, df in df_grezzo.groupby("FILE_ORIGINE", sort=False):
         df = classifica_distretto(df)

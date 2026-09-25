@@ -4,8 +4,12 @@ Prese da associare a un distretto — tab "Prese" (richiesto da Daniele il
 
 Neta H2O associa i distretti alle PRESE (colonna DP), non ai singoli codici
 servizio: questa pagina elenca, per un comune, le prese il cui distretto e'
-NODMA ("NO DISTRETTO"), "*"/vuoto, oppure un codice di un altro comune non
-associabile (stessa regola di motore_calcolo.classifica_distretto), le mostra
+NODMA ("NO DISTRETTO"), "*"/vuoto, un codice di un altro comune non
+associabile (stessa regola di motore_calcolo.classifica_distretto), oppure
+un distretto valido che non torna con la posizione della presa (dentro il
+confine di un altro distretto, o lontana dal suo; Daniele, 25/09/2026). Le
+prese sono fisse: cambia solo l'utenza collegata, e una presa assente
+dall'ultima estrazione e' solo senza utenza attiva, non sparita. Le mostra
 in mappa sopra i confini dei distretti, propone un distretto dalla posizione
 (dentro un confine, o il piu' vicino entro DISTANZA_MAX_PROPOSTA_M) e lascia
 all'editor la conferma. Le conferme finiscono in un file Excel da passare a
@@ -24,6 +28,7 @@ un'estrazione vecchia non riporta indietro coordinate gia' corrette.
 """
 from __future__ import annotations
 
+import collections
 import io
 import json
 import math
@@ -36,8 +41,11 @@ import pandas as pd
 
 from app import database, motore_calcolo
 
-# DP usato da Neta per i servizi senza una presa vera (2.726 servizi a
-# settembre 2026): non raggruppa nulla, ogni servizio resta una riga a se'.
+# DP segnaposto di Neta, non una presa vera: non raggruppa nulla, ogni
+# servizio resta una riga a se'. L'estrazione di Belgioioso di mag-giu 2026
+# lo aveva su TUTTE le righe (2.726 servizi), mentre le precedenti avevano la
+# presa vera (Daniele, 25/09/2026): un DP segnaposto o vuoto non sovrascrive
+# mai una presa vera gia' nota, ne' in anagrafica ne' nella riparazione.
 DP_SEGNAPOSTO = "301801000000000"
 
 # Rettangolo largo attorno alla provincia di Pavia: fuori da qui la coordinata
@@ -50,10 +58,23 @@ LON_VALIDA = (8.3, 9.7)
 # distanza: oltre, la proposta sarebbe un tiro a indovinare.
 DISTANZA_MAX_PROPOSTA_M = 300
 
+# Controllo "Diverso dalla posizione": una presa a meno di questi metri dal
+# confine del proprio distretto non si segnala, lo scarto puo' essere solo
+# l'errore della coordinata (Daniele, 25/09/2026).
+TOLLERANZA_BORDO_M = 30
+
+# Distretti soppressi, fusi in un altro (elenco in motore_calcolo, che nel
+# calcolo li unisce gia' al distretto nuovo): qui le loro prese vanno
+# associate in automatico al distretto nuovo e finiscono nel file per Neta
+# (vecchio -> nuovo), senza conferma a mano.
+DISTRETTI_FUSI = motore_calcolo.DISTRETTI_FUSI
+
 MOTIVI = {
     "NODMA": "NO DISTRETTO",
     "ND": "Distretto non indicato (*)",
     "ALTRO": "Distretto di un altro comune",
+    "POSIZIONE": "Distretto diverso dalla posizione",
+    "FUSO": "Distretto soppresso (fuso in un altro)",
 }
 
 COLONNE_ANAGRAFICA = [
@@ -124,18 +145,60 @@ def aggiorna_anagrafica(df: pd.DataFrame, nome_file: str) -> int:
     with database.connessione() as conn:
         assicura_tabelle(conn)
         conn.executemany("""
-            INSERT INTO anagrafica_servizi VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO anagrafica_servizi VALUES (:c0,:c1,:c2,:c3,:c4,:c5,:c6,:c7,:c8,:c9,:c10,:c11)
             ON CONFLICT(CODICE_SERVIZIO) DO UPDATE SET
-                DP=excluded.DP, LOCALITA=excluded.LOCALITA,
+                DP=CASE WHEN excluded.DP IN (:segnaposto, '')
+                         AND anagrafica_servizi.DP NOT IN (:segnaposto, '')
+                        THEN anagrafica_servizi.DP ELSE excluded.DP END,
+                LOCALITA=excluded.LOCALITA,
                 INDIRIZZO_UBICAZIONE=excluded.INDIRIZZO_UBICAZIONE, CAP_UBICAZIONE=excluded.CAP_UBICAZIONE,
                 Latitudine=excluded.Latitudine, Longitudine=excluded.Longitudine,
                 DISTRETTO=excluded.DISTRETTO, STATO_SERVIZIO=excluded.STATO_SERVIZIO,
                 FILE_ORIGINE=excluded.FILE_ORIGINE, DATA_ESTRAZIONE=excluded.DATA_ESTRAZIONE,
                 AGGIORNATO_IL=excluded.AGGIORNATO_IL
             WHERE excluded.DATA_ESTRAZIONE >= anagrafica_servizi.DATA_ESTRAZIONE
-        """, righe)
+        """, [{**{f"c{i}": v for i, v in enumerate(r)}, "segnaposto": DP_SEGNAPOSTO} for r in righe])
         conn.commit()
     return len(righe)
+
+
+def ripara_dp_segnaposto() -> tuple[int, int]:
+    """Rimette la presa vera ai servizi che in anagrafica hanno il DP
+    segnaposto (o vuoto), prendendo l'ultima presa vera dalle letture in
+    archivio, e sposta sulla presa le conferme gia' fatte sul singolo
+    servizio (chiave 'S' + codice). Idempotente, gira a ogni avvio.
+    Restituisce (servizi riparati, conferme spostate)."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        if not database.tabella_esiste(conn):
+            return 0, 0
+        da_riparare = [r[0] for r in conn.execute(
+            "SELECT CODICE_SERVIZIO FROM anagrafica_servizi WHERE DP IN (?, '') OR DP IS NULL",
+            (DP_SEGNAPOSTO,))]
+        if not da_riparare:
+            return 0, 0
+        # In letture DP e CODICE_SERVIZIO sono interi: confronto come testo.
+        veri = {}
+        for codice, dp in conn.execute("""
+            SELECT CAST(CODICE_SERVIZIO AS TEXT), CAST(DP AS TEXT) FROM letture
+            WHERE DP IS NOT NULL AND CAST(DP AS TEXT) NOT IN (?, '')
+            ORDER BY DATA_LETTURA""", (DP_SEGNAPOSTO,)):
+            veri[_testo_codice(codice)] = _testo_codice(dp)  # vince l'ultima per data
+        riparati = spostate = 0
+        for codice in da_riparare:
+            dp = veri.get(codice)
+            if not dp:
+                continue
+            conn.execute("UPDATE anagrafica_servizi SET DP=? WHERE CODICE_SERVIZIO=?", (dp, codice))
+            riparati += 1
+            # La conferma sul servizio passa alla presa, se la presa non ne ha gia' una.
+            spostate += conn.execute("""
+                UPDATE OR IGNORE prese_assegnazioni SET DP=? WHERE DP=?""", (dp, "S" + codice)).rowcount
+            conn.execute("DELETE FROM prese_assegnazioni WHERE DP=?", ("S" + codice,))
+        conn.commit()
+    if riparati:
+        print(f"[prese] DP segnaposto: {riparati} servizi riparati, {spostate} conferme spostate sulla presa")
+    return riparati, spostate
 
 
 # Stato della ricostruzione iniziale (dai file gia' caricati), per la pagina.
@@ -176,7 +239,10 @@ def ricostruisci_anagrafica() -> None:
 
 
 def avvia_ricostruzione_se_serve() -> None:
-    threading.Thread(target=ricostruisci_anagrafica, daemon=True).start()
+    def _lavoro():
+        ricostruisci_anagrafica()
+        ripara_dp_segnaposto()
+    threading.Thread(target=_lavoro, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +303,53 @@ def _distanza_anello_m(x: np.ndarray, y: np.ndarray, anello: np.ndarray, lat0: f
     return np.sqrt((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2).min(axis=1)
 
 
+def _dentro_confini(lat: np.ndarray, lon: np.ndarray, trovato: np.ndarray | None = None) -> list[str]:
+    """Per ogni punto il codice del distretto il cui confine lo contiene
+    ('' se nessuno o punto non valido). trovato, se passato, viene
+    aggiornato: True dove il punto cade dentro un confine."""
+    n = len(lat)
+    codici = [""] * n
+    if trovato is None:
+        trovato = np.zeros(n, dtype=bool)
+    validi = ~(np.isnan(lat) | np.isnan(lon))
+    for codice, anelli, (x0, y0, x1, y1) in _poligoni():
+        candidati = validi & ~trovato & (lon >= x0) & (lon <= x1) & (lat >= y0) & (lat <= y1)
+        idx = np.nonzero(candidati)[0]
+        if not len(idx):
+            continue
+        dentro = _dentro_anello(lon[idx], lat[idx], anelli[0])
+        for buco in anelli[1:]:
+            dentro &= ~_dentro_anello(lon[idx], lat[idx], buco)
+        for i in idx[dentro]:
+            codici[i] = codice
+        trovato[idx[dentro]] = True
+    return codici
+
+
+def _dentro_e_distanza(lat: np.ndarray, lon: np.ndarray, codice: str) -> tuple[np.ndarray, np.ndarray]:
+    """Per ogni punto: se cade dentro un confine del distretto codice, e la
+    distanza in metri dal bordo piu' vicino di quel distretto (dentro o
+    fuori). Distretto senza confine: (False, inf)."""
+    n = len(lat)
+    dentro = np.zeros(n, dtype=bool)
+    distanza = np.full(n, np.inf)
+    if n == 0:
+        return dentro, distanza
+    lat0 = float(np.mean(lat))
+    for c, anelli, _ in _poligoni():
+        if c != codice:
+            continue
+        d = _dentro_anello(lon, lat, anelli[0])
+        for buco in anelli[1:]:
+            d &= ~_dentro_anello(lon, lat, buco)
+        dentro |= d
+        for anello in anelli:
+            for i in range(0, n, 500):  # a blocchi: matrice punti x lati
+                distanza[i:i + 500] = np.minimum(
+                    distanza[i:i + 500], _distanza_anello_m(lon[i:i + 500], lat[i:i + 500], anello, lat0))
+    return dentro, distanza
+
+
 def proponi_distretti(lat: np.ndarray, lon: np.ndarray) -> list[tuple[str, int | None]]:
     """Per ogni punto: (codice, None) se cade dentro un confine, (codice,
     distanza_m) se il piu' vicino e' entro DISTANZA_MAX_PROPOSTA_M, ("", None)
@@ -248,17 +361,9 @@ def proponi_distretti(lat: np.ndarray, lon: np.ndarray) -> list[tuple[str, int |
     poligoni = _poligoni()
     validi = ~(np.isnan(lat) | np.isnan(lon))
     trovato = np.zeros(n, dtype=bool)
-    for codice, anelli, (x0, y0, x1, y1) in poligoni:
-        candidati = validi & ~trovato & (lon >= x0) & (lon <= x1) & (lat >= y0) & (lat <= y1)
-        idx = np.nonzero(candidati)[0]
-        if not len(idx):
-            continue
-        dentro = _dentro_anello(lon[idx], lat[idx], anelli[0])
-        for buco in anelli[1:]:
-            dentro &= ~_dentro_anello(lon[idx], lat[idx], buco)
-        for i in idx[dentro]:
+    for i, codice in enumerate(_dentro_confini(lat, lon, trovato)):
+        if codice:
             esito[i] = (codice, None)
-        trovato[idx[dentro]] = True
 
     fuori = np.nonzero(validi & ~trovato)[0]
     if len(fuori):
@@ -341,7 +446,8 @@ def prese_comune(comune: str) -> pd.DataFrame:
     riga ciascuno), escluse quelle con tutti i servizi cessati e gia'
     fatturati. Colonne: CHIAVE, DP, INDIRIZZO, CAP, SERVIZI (testo), N_SERVIZI,
     DISTRETTO (attuale, piu' codici separati da ' / '), MOTIVO (NODMA / ND /
-    ALTRO / '' se a posto), LAT, LON, COORD_VALIDE."""
+    ALTRO / POSIZIONE / FUSO / '' se a posto), LAT, LON, COORD_VALIDE,
+    AUTOMATICO (distretto nuovo per le prese di un distretto fuso, o '')."""
     with database.connessione() as conn:
         s = _servizi_comune(conn, comune)
     if s.empty:
@@ -360,12 +466,13 @@ def prese_comune(comune: str) -> pd.DataFrame:
         ["NODMA", "ND", "ALTRO"], default="",
     )
     s["DISTRETTO"] = s["DISTRETTO"].where(~vuoto, "*")
+    s.loc[s["DISTRETTO"].str.upper().isin(DISTRETTI_FUSI), "MOTIVO"] = "FUSO"
     s["CHIAVE"] = np.where(s["DP"].isin([DP_SEGNAPOSTO, ""]), "S" + s["CODICE_SERVIZIO"], s["DP"])
     s = s.sort_values(["DATA_ESTRAZIONE", "CODICE_SERVIZIO"])
 
     # Raggruppamento in Python semplice: groupby di pandas, un gruppo alla
     # volta, impiegava ~5 s su Voghera (~9.000 prese).
-    priorita = {"ND": 3, "ALTRO": 2, "NODMA": 1, "": 0}
+    priorita = {"ND": 5, "ALTRO": 4, "FUSO": 3, "POSIZIONE": 2, "NODMA": 1, "": 0}
     gruppi: dict[str, list[dict]] = {}
     for r in s[["CHIAVE", "CODICE_SERVIZIO", "INDIRIZZO_UBICAZIONE", "CAP_UBICAZIONE", "DISTRETTO",
                 "MOTIVO", "Latitudine", "Longitudine"]].to_dict("records"):
@@ -391,11 +498,77 @@ def prese_comune(comune: str) -> pd.DataFrame:
     p["LAT"] = pd.to_numeric(p["LAT"], errors="coerce")
     p["LON"] = pd.to_numeric(p["LON"], errors="coerce")
     p["COORD_VALIDE"] = _coordinate_valide(p["LAT"], p["LON"])
+
+    # Distretto valido ma posizione che non torna (Daniele, 25/09/2026), per
+    # ogni distretto della presa (piu' codici se i servizi non concordano):
+    # - presa dentro il confine di un ALTRO distretto (es. a Belgioioso prese
+    #   codificate DBLG02 Santa Margherita che stanno in DBLG03 Centro);
+    # - presa fuori da ogni confine e a piu' di DISTANZA_MAX_PROPOSTA_M dal
+    #   confine del suo distretto;
+    # - distretto senza confine disegnato (Casteggio, Voghera in parte) e
+    #   presa dentro il confine di un altro distretto, diverso da quello in
+    #   cui cade la maggior parte delle prese di quel distretto.
+    # Non si segnala se la presa e' a meno di TOLLERANZA_BORDO_M dal confine
+    # del suo distretto (o, senza confine, dal bordo di quello in cui cade).
+    con_confine = {c for c, _, _ in _poligoni()}
+    da_controllare = np.nonzero(((p["MOTIVO"] == "") & p["COORD_VALIDE"]).to_numpy())[0]
+    if len(da_controllare):
+        lat = p["LAT"].to_numpy(dtype=float)[da_controllare]
+        lon = p["LON"].to_numpy(dtype=float)[da_controllare]
+        dal_confine = np.array(_dentro_confini(lat, lon), dtype=object)
+        attuali = [set(d.split(" / ")) for d in p["DISTRETTO"].to_numpy()[da_controllare]]
+        sbagliato = np.zeros(len(da_controllare), dtype=bool)
+        for codice in set().union(*attuali):
+            k = np.array([codice in a and dal_confine[i] != codice for i, a in enumerate(attuali)])
+            if not k.any():
+                continue
+            k = np.nonzero(k)[0]
+            if codice in con_confine:
+                dentro, dist = _dentro_e_distanza(lat[k], lon[k], codice)
+                lontana = np.where(dal_confine[k] != "", dist > TOLLERANZA_BORDO_M, dist > DISTANZA_MAX_PROPOSTA_M)
+                sbagliato[k[~dentro & lontana]] = True
+            else:
+                # La zona abituale (dove cade la maggior parte delle sue
+                # prese) non si segnala: e' il confine che manca, non il
+                # distretto sbagliato. Era il caso di DVH02/DVH03 in DVH05 e
+                # DCT04 in DCT13 (899 falsi allarmi), poi risultati fusi:
+                # vedi DISTRETTI_FUSI. Un distretto senza confine e' con ogni
+                # probabilita' un altro distretto fuso da aggiungere li'.
+                abituale = collections.Counter(dal_confine[k]).most_common(1)[0][0]
+                for pos in set(dal_confine[k]) - {"", abituale}:
+                    j = k[dal_confine[k] == pos]
+                    _, profondita = _dentro_e_distanza(lat[j], lon[j], pos)
+                    sbagliato[j[profondita > TOLLERANZA_BORDO_M]] = True
+        p.loc[p.index[da_controllare[sbagliato]], "MOTIVO"] = "POSIZIONE"
+
+    # Distretto fuso: associazione automatica al distretto nuovo, salvo se
+    # la presa cade chiaramente (oltre TOLLERANZA_BORDO_M) dentro il confine
+    # di un altro distretto: allora resta da confermare a mano.
+    p["AUTOMATICO"] = ""
+    fusi = np.nonzero((p["MOTIVO"] == "FUSO").to_numpy())[0]
+    if len(fusi):
+        nuovi = np.array([
+            next(DISTRETTI_FUSI[d] for d in att.upper().split(" / ") if d in DISTRETTI_FUSI)
+            for att in p["DISTRETTO"].to_numpy()[fusi]
+        ], dtype=object)
+        ok = np.ones(len(fusi), dtype=bool)
+        coord = p["COORD_VALIDE"].to_numpy()[fusi]
+        if coord.any():
+            c = np.nonzero(coord)[0]
+            lat = p["LAT"].to_numpy(dtype=float)[fusi][c]
+            lon = p["LON"].to_numpy(dtype=float)[fusi][c]
+            pos = np.array(_dentro_confini(lat, lon), dtype=object)
+            for nuovo in set(nuovi[c]):
+                j = np.nonzero((nuovi[c] == nuovo) & (pos != "") & (pos != nuovo))[0]
+                if len(j):
+                    _, dist = _dentro_e_distanza(lat[j], lon[j], nuovo)
+                    ok[c[j[dist > TOLLERANZA_BORDO_M]]] = False
+        p.loc[p.index[fusi[ok]], "AUTOMATICO"] = nuovi[ok]
     return p
 
 
 def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
-    """Le prese con un motivo (NODMA/ND/ALTRO) piu' quelle gia' confermate
+    """Le prese con un motivo (NODMA/ND/ALTRO/POSIZIONE/FUSO) piu' quelle gia' confermate
     in passato (anche se nel frattempo Neta le ha corrette: cosi' si vede
     cosa e' stato recepito), con proposta e conferma."""
     p = prese_comune(comune)
@@ -409,6 +582,9 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
         }),
         on="CHIAVE", how="left",
     )
+    auto = p["CONFERMATO"].isna() & (p["AUTOMATICO"] != "")
+    p.loc[auto, "CONFERMATO"] = p.loc[auto, "AUTOMATICO"]
+    p.loc[auto, "CONFERMATO_DA"] = "automatico (distretto fuso)"
     p = p[(p["MOTIVO"] != "") | p["CONFERMATO"].notna()].reset_index(drop=True)
     lat = p["LAT"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     lon = p["LON"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
@@ -426,7 +602,8 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
     for comune in comuni:
         p = prese_da_assegnare(comune, con_proposta=False)
         if p.empty:
-            righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "confermate": 0, "recepite": 0})
+            righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0,
+                          "confermate": 0, "recepite": 0})
             continue
         aperte = p[p["MOTIVO"] != ""]
         righe.append({
@@ -434,6 +611,8 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
             "NODMA": int((aperte["MOTIVO"] == "NODMA").sum()),
             "ND": int((aperte["MOTIVO"] == "ND").sum()),
             "ALTRO": int((aperte["MOTIVO"] == "ALTRO").sum()),
+            "POSIZIONE": int((aperte["MOTIVO"] == "POSIZIONE").sum()),
+            "FUSO": int((aperte["MOTIVO"] == "FUSO").sum()),
             "confermate": int(p["CONFERMATO"].notna().sum()),
             "recepite": int(p["RECEPITO"].sum()),
         })
