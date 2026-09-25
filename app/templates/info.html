@@ -66,6 +66,67 @@
 </div>
 
 <div class="panel">
+  <h2>Distretti soppressi</h2>
+  <p>Alcuni distretti sono stati fusi in altri e non esistono più in WMS SmartH2O: <strong>DVH02 e DVH03 → DVH05</strong>
+    (Voghera), <strong>DCT04 e DCT07 → DCT13</strong> (Casteggio). Finché Neta non corregge il gestionale le estrazioni
+    li riportano ancora: il calcolo li unisce in automatico al distretto nuovo, anche per i mesi passati, così
+    Import_WMS ha solo codici attuali. I totali del comune non cambiano. Nel tab Prese queste prese compaiono come
+    "Distretto soppresso", già associate al distretto nuovo, e finiscono nel file per Neta.</p>
+</div>
+
+<div class="panel">
+  <h2>Prese e distretti: come funzionano i controlli</h2>
+  <p>Neta associa i distretti alle <strong>prese</strong> (colonna DP). Una presa non cambia mai: cambia solo l'utenza
+    collegata. Una presa che manca da un'estrazione non è sparita: è chiusa, senza utenza attiva. Il tab
+    <a href="/pagine/prese">Prese</a> segnala le prese da sistemare. Le conferme finiscono nel file per Neta e
+    <strong>non cambiano i volumi</strong>.</p>
+  <ul>
+    <li><strong>Prima l'indirizzo, poi la posizione.</strong> Se la via della presa è nello stradario, decide la via. Se
+      Neta e via concordano il distretto è giusto, anche quando la coordinata cade altrove: in quel caso è la coordinata
+      da correggere. La posizione (il confine in cui cade il punto) si usa solo per le vie senza distretto.</li>
+    <li><strong>Stradario via → distretto</strong> (sotto-tab Stradario): ricavato una tantum per comune dalle prese.
+      Conta un voto per civico, non per presa, così un condominio non pesa più di una casa. Le vie divise tra due distretti
+      hanno un tratto per distretto (per civico, a volte pari e dispari separati). Un palazzo con più prese in un altro
+      distretto diventa un'eccezione da verificare. Le vie senza un taglio netto restano "a cavallo" e non si controllano.
+      Non votano le prese a meno di 30 m dal confine né quelle con la coordinata sbagliata (vedi sotto). Il file
+      <code>project_docs/stradario_distretti.csv</code> è correggibile a mano; rigenerarlo cancella le correzioni.</li>
+    <li><strong>OpenStreetMap</strong>: il tracciato vero delle vie, indipendente da Neta. I nomi sono abbinati anche se
+      scritti in modo diverso (VIA F.LLI CAIROLI = Via Fratelli Cairoli, VIA XX SETTEMBRE = Via Venti Settembre). Serve a
+      dire se una presa sta davvero sulla sua via (entro 150 m) e, nello stradario, quali distretti la via attraversa: in
+      rosso se non c'è il distretto dello stradario.</li>
+    <li><strong>Motivi</strong>: NO DISTRETTO; <code>*</code> (non indicato); distretto di un altro comune; distretto
+      soppresso; via di altro distretto (Neta dice un distretto, lo stradario un altro); diverso dalla posizione (solo
+      per le vie senza distretto: la presa cade dentro un altro distretto, oltre 30 m dal confine del suo).</li>
+    <li><strong>Proposta</strong>: "via e posizione d'accordo" (la più sicura), "dalla via" oppure "dalla posizione".
+      Il pulsante di conferma in blocco prende solo le proposte sicure.</li>
+    <li><strong>Mantieni attuale</strong>: se la segnalazione è un falso allarme confermi il distretto che la presa ha
+      già (anche NO DISTRETTO). La presa è <em>validata</em>: non conta più tra quelle da sistemare e non va nel file per
+      Neta. Se un giorno Neta le cambiasse distretto, ricomparirebbe come conferma da recepire.</li>
+    <li><strong>Confini dei comuni</strong>: in tutte le mappe si possono mostrare i confini ISTAT dei comuni dal menu dei
+      livelli in alto a destra ("Confini comuni (ISTAT)").</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Coordinate da verificare e invii a Neta</h2>
+  <p>Un file a parte per Neta, <strong>ricalcolato a ogni estrazione</strong> indipendentemente dalle conferme del
+    distretto: una presa ci resta finché Neta non corregge la coordinata. I problemi segnalati sono:</p>
+  <ul>
+    <li><strong>mancanti</strong>, a 0,0, fuori provincia, <strong>virgola mancante</strong> (8742620 invece di 8,742620)
+      o <strong>latitudine e longitudine invertite</strong>; negli ultimi due casi c'è anche la coordinata corretta;</li>
+    <li><strong>fuori dal comune</strong>, dai confini ufficiali ISTAT (per esempio "cade in Noviglio (MI)"), con 100 m
+      di tolleranza;</li>
+    <li><strong>coordinata segnaposto</strong>: lo stesso punto usato per prese di 3 o più vie diverse;</li>
+    <li><strong>lontana dalla sua via</strong>: oltre 150 m dal tracciato OpenStreetMap. Se la via non è in OSM si usa il
+      confronto con i civici vicini, e la coordinata proposta è il loro punto centrale;</li>
+    <li><strong>in un altro distretto rispetto alla sua via</strong>.</li>
+  </ul>
+  <p><strong>Registra invio</strong> scarica il file con le sole prese ancora aperte e lo segna nel registro: data, chi,
+    quali prese. Il registro dice quante prese Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
+    dice quante volte una presa era già stata mandata. Gli Excel "solo per guardare" non registrano niente.</p>
+</div>
+
+<div class="panel">
   <h2>Come leggere i grafici</h2>
   <ul>
     <li><strong>Volumi mensili per distretto</strong> — tre colori nella stessa barra: <span style="color:#1C7C4C">verde = reale</span>

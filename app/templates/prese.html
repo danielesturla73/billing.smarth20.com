@@ -6,7 +6,7 @@
   Neta H2O associa i distretti alle <strong>prese</strong>: qui ci sono quelle con distretto
   <strong>NO DISTRETTO</strong>, <strong>*</strong> (non indicato) o <strong>di un altro comune</strong> non associabile,
   da sistemare guardando la mappa. Il distretto proposto viene dalla posizione: quello in cui la presa cade, oppure
-  il più vicino entro {{ distanza_max }} m. Le conferme finiscono nel file Excel per Neta e <strong>non cambiano i
+  il più vicino entro {{ distanza_max }} m. Se la via è nello stradario prevale la via (prima l'indirizzo, poi la posizione). Le conferme finiscono nel file Excel per Neta e <strong>non cambiano i
   volumi</strong>: il distretto giusto entra nei calcoli quando Neta corregge il suo gestionale e arriva l'estrazione successiva.
   Coordinate e distretto sono quelli dell'estrazione più recente di ogni servizio.
 </p>
@@ -28,18 +28,59 @@
   <div class="table-scroll" style="max-height:none">
     <table>
       <thead><tr><th>Comune</th><th class="num">NO DISTRETTO</th><th class="num">*</th><th class="num">Altro comune</th>
-        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Via di altro distretto</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
+        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Via di altro distretto</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th><th class="num">Validate</th><th class="num">Coordinate da verificare</th></tr></thead>
       <tbody>
         {% for r in riepilogo %}
         <tr>
           <td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td>
           <td class="num">{{ r.NODMA }}</td><td class="num">{{ r.ND }}</td><td class="num">{{ r.ALTRO }}</td>
-          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.VIA }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
+          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.VIA }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td><td class="num">{{ r.validate }}</td><td class="num">{{ r.coordinate }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+</div>
+
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+    <h2 style="margin:0">Invii a Neta</h2>
+    {% if puo_modificare %}
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <form method="post" action="/prese/invio"><input type="hidden" name="tipo" value="distretti">
+        <button class="btn-primario" type="submit">Registra invio: distretti confermati</button></form>
+      <form method="post" action="/prese/invio"><input type="hidden" name="tipo" value="coordinate">
+        <button class="btn-primario" type="submit">Registra invio: coordinate da verificare</button></form>
+    </span>
+    {% endif %}
+  </div>
+  <p class="nota-metodologica" style="margin-bottom:10px">
+    "Registra invio" scarica il file da mandare a Neta (tutti i comuni; dalla pagina di un comune solo quel comune)
+    con le sole prese ancora aperte, e se lo segna: data, chi, quali prese. <em>Aperte</em> sono quelle che a oggi
+    Neta non ha ancora sistemato (distretto non recepito, coordinata ancora da verificare): da sollecitare.
+    Nel file la colonna "Già inviata" dice quante volte una presa era già stata mandata.
+    Gli Excel qui sopra servono solo a guardare, non registrano niente. Dopo un invio ricarica la pagina.
+  </p>
+  {% if invii %}
+  <div class="table-scroll" style="max-height:none">
+    <table>
+      <thead><tr><th>Quando</th><th>Chi</th><th>Cosa</th><th>Comuni</th><th class="num">Prese inviate</th>
+        <th class="num">Risolte da Neta</th><th class="num">Ancora aperte</th></tr></thead>
+      <tbody>
+        {% for i in invii %}
+        <tr>
+          <td>{{ i.quando }}</td><td>{{ i.utente }}</td>
+          <td>{{ 'Distretti confermati' if i.tipo == 'distretti' else 'Coordinate da verificare' }}</td>
+          <td class="testo-tenue">{{ i.comuni }}</td>
+          <td class="num">{{ i.n_prese }}</td><td class="num">{{ i.risolte }}</td><td class="num">{{ i.aperte }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="testo-tenue">Nessun invio registrato.</p>
+  {% endif %}
 </div>
 {% else %}
 
@@ -50,7 +91,13 @@
   <span style="flex:1"></span>
   <a href="/prese/esporta?comune={{ comune | urlencode }}">Excel conferme (per Neta)</a>
   <a href="/prese/esporta?comune={{ comune | urlencode }}&tutte=1">Excel elenco completo</a>
-  <a href="/prese/coordinate?comune={{ comune | urlencode }}">Excel coordinate da verificare (per Neta)</a>
+  <a href="/prese/coordinate?comune={{ comune | urlencode }}">Excel coordinate da verificare</a>
+  {% if puo_modificare %}
+  <form method="post" action="/prese/invio" style="display:inline"><input type="hidden" name="tipo" value="distretti">
+    <input type="hidden" name="comune" value="{{ comune }}"><button class="btn-link" type="submit">Registra invio distretti a Neta</button></form>
+  <form method="post" action="/prese/invio" style="display:inline"><input type="hidden" name="tipo" value="coordinate">
+    <input type="hidden" name="comune" value="{{ comune }}"><button class="btn-link" type="submit">Registra invio coordinate a Neta</button></form>
+  {% endif %}
 </div>
 
 {% if vista == 'assegnare' %}
@@ -121,12 +168,14 @@
     altro distretto finiscono nell'elenco con il motivo <strong>Via di altro distretto</strong>.
     Il file è <span class="mono">project_docs/stradario_distretti.csv</span>, correggibile a mano;
     rigenerarlo cancella le correzioni fatte per questo comune.
+    L'ultima colonna viene da OpenStreetMap (© OpenStreetMap contributors, ODbL), indipendente dalle coordinate di Neta:
+    i distretti che il tracciato della via attraversa, in proporzione alla lunghezza; in rosso se non c'è il distretto dello stradario.
   </p>
   {% if stradario %}
   <div class="table-scroll" style="max-height:none">
     <table>
       <thead><tr><th>Via</th><th>Civici</th><th class="num">Dal</th><th class="num">Al</th><th>Distretto</th>
-        <th class="num">Prese</th><th class="num">Fuori posto</th><th>Note</th></tr></thead>
+        <th class="num">Prese</th><th class="num">Fuori posto</th><th>Note</th><th>Distretti della via in OpenStreetMap</th></tr></thead>
       <tbody>
         {% for r in stradario %}
         <tr>
@@ -137,6 +186,8 @@
           <td class="num">{{ r.n_prese if r.n_prese is not none else '' }}</td>
           <td class="num">{{ r.n_discordanti if r.n_discordanti is not none else '' }}</td>
           <td class="testo-tenue">{{ r.note }}</td>
+          <td>{% if r.osm_nome %}<span class="mono"{% if r.distretto and r.distretto not in r.osm_distretti %} style="color:var(--danger, #B3261E);font-weight:600"{% endif %}>{{ r.osm_distretti }}</span>
+            <span class="testo-tenue">({{ r.osm_nome }})</span>{% else %}<span class="testo-tenue">non trovata</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -173,6 +224,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
 {% if vista != 'stradario' %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/confini_comuni.js"></script>
 <script>
 (function () {
   const COMUNE = {{ comune | tojson }};
@@ -192,7 +244,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'Esri World Imagery', maxZoom: 20, maxNativeZoom: 19,
   });
-  L.control.layers({ 'Mappa': baseMappa, 'Satellite': baseSatellite }, null, { position: 'topright' }).addTo(mappa);
+  L.control.layers({ 'Mappa': baseMappa, 'Satellite': baseSatellite },
+    { 'Confini comuni (ISTAT)': stratoConfiniComuni(mappa) }, { position: 'topright' }).addTo(mappa);
 
   // Etichette dei codici distretto: solo da vicino, altrimenti si sovrappongono.
   const etichette = L.layerGroup();
@@ -251,9 +304,13 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   RIGHE.forEach(function (r) {
     if (!r.COORD_VALIDE) return;
     const m = L.circleMarker([r.LAT, r.LON], { radius: 6, weight: 1.5, color: '#fff', fillColor: colore(r), fillOpacity: 0.95 });
+    // Stessa proposta dell'elenco (prima la via, poi la posizione).
     m.bindTooltip(() => `<strong class="mono">${esc(r.DP || 'servizio ' + r.SERVIZI)}</strong><br>${esc(r.INDIRIZZO)}<br>` +
-      `Attuale: ${esc(r.DISTRETTO)}` + (r.PROPOSTA ? ` · proposta ${esc(r.PROPOSTA)}` : '') +
-      (r.CONFERMATO ? `<br>Confermato: <strong>${esc(r.CONFERMATO)}</strong>` : ''), { className: 'tooltip-distretto' });
+        (MOTIVO_TESTO[r.MOTIVO] ? `${esc(MOTIVO_TESTO[r.MOTIVO])}<br>` : '') +
+        `Attuale: ${esc(r.DISTRETTO)}` +
+        (r.PROPOSTA ? ` · proposta <strong>${esc(r.PROPOSTA)}</strong> (${esc(FONTE[r.PROPOSTA_DA] || '')})` : '') +
+        (r.CONFERMATO ? `<br>Confermato: <strong>${esc(r.CONFERMATO)}</strong>` : ''),
+      { className: 'tooltip-distretto' });
     m.on('click', () => seleziona(r.CHIAVE, true));
     marcatori.set(r.CHIAVE, m);
   });
@@ -275,7 +332,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
 
   function kpi() {
-    const aperte = RIGHE.filter(r => r.MOTIVO);
+    const aperte = RIGHE.filter(r => r.MOTIVO && !r.VALIDATA);
     const conta = m => aperte.filter(r => r.MOTIVO === m).length;
     const card = (etichetta, valore, classe) => `<div class="kpi ${classe || ''}"><div class="etichetta">${etichetta}</div><div class="valore">${fmt(valore)}</div></div>`;
     document.getElementById('kpi').innerHTML =
@@ -284,15 +341,24 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       card('Diverso dalla posizione', conta('POSIZIONE')) +
       card('Distretto soppresso', conta('FUSO')) +
       card('Via di altro distretto', conta('VIA')) +
-      card('Confermate', RIGHE.filter(r => r.CONFERMATO).length) +
+      card('Confermate', RIGHE.filter(r => r.CONFERMATO && !r.VALIDATA).length) +
+      card('Validate (distretto attuale giusto)', RIGHE.filter(r => r.VALIDATA).length) +
       card('Senza coordinate valide', RIGHE.filter(r => !r.COORD_VALIDE).length);
   }
 
+  // Da dove viene la proposta: prima l'indirizzo (stradario), poi la posizione.
+  const FONTE = { 'via e posizione': "via e posizione d'accordo", 'via': 'dalla via', 'posizione': 'dalla posizione' };
+  // Proposte "sicure" per la conferma in blocco: via e posizione d'accordo,
+  // oppure (via senza distretto) presa dentro un confine.
+  const sicura = r => !r.CONFERMATO && r.PROPOSTA &&
+    (r.PROPOSTA_DA === 'via e posizione' || (r.PROPOSTA_DA === 'posizione' && r.DISTANZA_M == null));
+
   function testoProposta(r) {
-    if (r.MOTIVO === 'VIA') return `Proposta <strong class="mono">${esc(r.DISTRETTO_VIA)}</strong> <span class="testo-tenue">dalla via (stradario)</span>`;
-    const via = r.DISTRETTO_VIA && r.DISTRETTO_VIA !== r.PROPOSTA
-      ? ` <span class="testo-tenue">· via: <strong class="mono">${esc(r.DISTRETTO_VIA)}</strong></span>` : '';
-    return testoPosizione(r) + via;
+    if (r.PROPOSTA_DA === 'via' || r.PROPOSTA_DA === 'via e posizione') {
+      const nota = r.PROPOSTA_DA === 'via' && r.COORD_VALIDE ? ' · la posizione dice altro: coordinata da verificare' : '';
+      return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">${FONTE[r.PROPOSTA_DA]}${nota}</span>`;
+    }
+    return testoPosizione(r);
   }
 
   function testoPosizione(r) {
@@ -304,19 +370,26 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">${dove}</span>${altro}`;
   }
 
+  // "Mantieni attuale": il distretto che la presa ha gia' e' giusto (falso
+  // allarme). Non per * (manca), distretti soppressi o prese con piu' codici.
+  const mantenibile = r => r.DISTRETTO && r.DISTRETTO !== '*' && !r.DISTRETTO.includes(' / ') && r.MOTIVO !== 'FUSO';
+
   function htmlRiga(r) {
     // Distretto fuso: associata in automatico, si puo' solo scegliere un altro distretto.
     const automatica = r.CONFERMATO_DA === 'automatico (distretto fuso)';
     const conferma = r.CONFERMATO
       ? `<div class="confermato">✓ <strong class="mono">${esc(r.CONFERMATO)}</strong>
            <span class="testo-tenue">${esc(r.CONFERMATO_DA || '')} ${esc((r.CONFERMATO_IL || '').slice(0, 10))}</span>
-           ${r.RECEPITO ? '<span class="badge real">recepito da Neta</span>' : ''}
+           ${r.VALIDATA ? '<span class="badge real">validata: distretto attuale corretto</span>'
+             : r.RECEPITO ? '<span class="badge real">recepito da Neta</span>'
+             : (r.N_INVII ? `<span class="badge stimato">inviata a Neta ${r.N_INVII > 1 ? r.N_INVII + ' volte, ' : ''}il ${esc(String(r.ULTIMO_INVIO).slice(0, 10))}</span>` : '')}
            ${PUO_MODIFICARE && !automatica ? '<button type="button" class="btn-link pericolo azione-togli">togli</button>' : ''}</div>`
       : '';
     const modulo = PUO_MODIFICARE && (!r.CONFERMATO || automatica)
       ? `<div class="modulo-assegna">
-           <input class="campo-distretto mono" list="lista-distretti" value="${esc((r.MOTIVO === 'VIA' ? r.DISTRETTO_VIA : r.PROPOSTA) || '')}" placeholder="Distretto" size="9">
+           <input class="campo-distretto mono" list="lista-distretti" value="${esc(r.PROPOSTA || '')}" placeholder="Distretto" size="9">
            <button type="button" class="btn-primario azione-conferma">Conferma</button>
+           ${mantenibile(r) ? `<button type="button" class="btn-link azione-mantieni" title="Il distretto attuale è giusto: la presa è validata e non va a Neta">Mantieni attuale (${esc(r.DISTRETTO)})</button>` : ''}
          </div>` : '';
     return `<div class="riga-presa${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
       <div class="riga-testa">
@@ -351,8 +424,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     document.getElementById('conteggio').textContent = `${fmt(righe.length)} prese nell'elenco`;
     const bottone = document.getElementById('conferma-proposte');
     if (bottone) {
-      const n = righe.filter(r => !r.CONFERMATO && r.MOTIVO !== 'VIA' && r.PROPOSTA && r.DISTANZA_M == null).length;
-      bottone.textContent = `Conferma le proposte "dentro il confine" (${fmt(n)})`;
+      const n = righe.filter(sicura).length;
+      bottone.textContent = `Conferma le proposte sicure (${fmt(n)})`;
       bottone.disabled = n === 0;
     }
     kpi();
@@ -387,6 +460,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       r.CONFERMATO_DA = v.distretto ? {{ request.state.utente.username | tojson }} : null;
       r.CONFERMATO_IL = v.distretto ? oggi : null;
       r.RECEPITO = !!v.distretto && r.DISTRETTO === v.distretto;
+      r.VALIDATA = !!v.validata && r.RECEPITO;
     });
     disegna();
     return true;
@@ -400,6 +474,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       const valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
       if (!valore) { alert('Scrivi o scegli un distretto.'); return; }
       invia([{ chiave: chiave, distretto: valore }]);
+    } else if (e.target.classList.contains('azione-mantieni')) {
+      const r = perChiave.get(chiave);
+      invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
     } else if (e.target.classList.contains('azione-togli')) {
       invia([{ chiave: chiave, distretto: '' }]);
     } else if (e.target.tagName !== 'INPUT') {
@@ -417,9 +494,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   });
   const bottone = document.getElementById('conferma-proposte');
   if (bottone) bottone.addEventListener('click', function () {
-    const voci = visibili().filter(r => !r.CONFERMATO && r.MOTIVO !== 'VIA' && r.PROPOSTA && r.DISTANZA_M == null)
-      .map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
-    if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese che cadono dentro un confine?`)) invia(voci);
+    const voci = visibili().filter(sicura).map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
+    if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese (via e posizione d'accordo, o dentro un confine quando la via non ha distretto)?`)) invia(voci);
   });
   document.querySelectorAll('.f-motivo, #f-stato').forEach(el => el.addEventListener('change', disegna));
   document.getElementById('f-testo').addEventListener('input', disegna);

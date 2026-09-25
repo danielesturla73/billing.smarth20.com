@@ -33,13 +33,14 @@ import io
 import json
 import math
 import threading
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from app import database, motore_calcolo, stradario
+from app import database, motore_calcolo, stradario, vie_osm
 
 # DP segnaposto di Neta, non una presa vera: non raggruppa nulla, ogni
 # servizio resta una riga a se'. L'estrazione di Belgioioso di mag-giu 2026
@@ -69,6 +70,27 @@ DISTANZA_FUORI_COMUNE_M = 1000
 # Le case sparse (NO DISTRETTO) stanno spesso in campagna a 1-2 km dai
 # distretti (mediana 1,6 km a settembre 2026): per loro solo oltre 5 km.
 DISTANZA_FUORI_COMUNE_NODMA_M = 5000
+
+# Coordinata lontana dal resto della via: un civico a piu' di tanto dal
+# punto mediano dei civici vicini per numero (fino a 3 sotto e 3 sopra)
+# della stessa via ha la coordinata sbagliata. A Belgioioso Via Molino 24
+# (8 prese con la stessa coordinata), 26 e 40 stavano a ~1 km dal resto
+# della via, dentro DBLG03, e lo stradario ne faceva un'eccezione (Daniele,
+# 25/09/2026: Via Molino e' tutta DBLG02).
+DISTANZA_FUORI_VIA_M = 400
+VICINI_PER_LATO = 3
+# Sulle strade di campagna i civici vicini per numero sono lontani anche nella
+# realta': la soglia cresce con la dispersione dei vicini (tante volte la
+# loro distanza mediana dal loro centro).
+FATTORE_DISPERSIONE_VIA = 3
+# Coordinata "segnaposto": lo stesso punto (al metro) usato per prese di
+# almeno tante vie diverse (a Voghera un punto per 16 prese di 14 vie).
+MIN_VIE_COORDINATA_CONDIVISA = 3
+
+# Distanza massima di una presa dal tracciato OSM della sua via (le case
+# possono stare arretrate dalla strada): a Belgioioso mediana 14 m, 90% entro
+# 69 m, oltre 150 m 141 prese, tutte coordinate sbagliate a campione.
+DISTANZA_MAX_DA_VIA_OSM_M = 150
 
 # Distretti soppressi, fusi in un altro (elenco in motore_calcolo, che nel
 # calcolo li unisce gia' al distretto nuovo): qui le loro prese vanno
@@ -110,6 +132,27 @@ def assicura_tabelle(conn) -> None:
             DISTRETTO TEXT NOT NULL, UTENTE TEXT, QUANDO TEXT,
             PRIMARY KEY (LOCALITA, DP)
         )""")
+    # VALIDATA = 1: "mantieni attuale", il distretto che la presa ha gia' in
+    # Neta e' giusto e la segnalazione era un falso allarme (Daniele,
+    # 25/09/2026). Conta come recepita, non va nel file per Neta.
+    colonne = {r[1] for r in conn.execute("PRAGMA table_info(prese_assegnazioni)")}
+    if "VALIDATA" not in colonne:
+        conn.execute("ALTER TABLE prese_assegnazioni ADD COLUMN VALIDATA INTEGER NOT NULL DEFAULT 0")
+    # Registro degli invii a Neta (Daniele, 25/09/2026): cosa e' stato
+    # mandato, quando e da chi, per vedere cosa Neta ha recepito e cosa
+    # sollecitare. TIPO: 'distretti' (conferme) o 'coordinate'.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invii_neta (
+            ID INTEGER PRIMARY KEY AUTOINCREMENT,
+            QUANDO TEXT NOT NULL, UTENTE TEXT, TIPO TEXT NOT NULL,
+            COMUNI TEXT, N_PRESE INTEGER
+        )""")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invii_neta_prese (
+            ID_INVIO INTEGER NOT NULL, LOCALITA TEXT NOT NULL, CHIAVE TEXT NOT NULL,
+            VALORE TEXT, LAT REAL, LON REAL
+        )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invii_prese ON invii_neta_prese (LOCALITA, CHIAVE)")
     conn.commit()
 
 
@@ -250,6 +293,10 @@ def avvia_ricostruzione_se_serve() -> None:
     def _lavoro():
         ricostruisci_anagrafica()
         ripara_dp_segnaposto()
+        with database.connessione() as conn:
+            assicura_tabelle(conn)
+            comuni = [r[0] for r in conn.execute("SELECT DISTINCT LOCALITA FROM anagrafica_servizi ORDER BY 1")]
+        riepilogo_comuni(comuni)
     threading.Thread(target=_lavoro, daemon=True).start()
 
 
@@ -332,6 +379,79 @@ def _dentro_confini(lat: np.ndarray, lon: np.ndarray, trovato: np.ndarray | None
             codici[i] = codice
         trovato[idx[dentro]] = True
     return codici
+
+
+# Confini dei comuni ISTAT (unita' amministrative a fini statistici al
+# 01/01/2025, generalizzati), convertiti una volta in GeoJSON lon/lat per i
+# comuni attorno alla provincia di Pavia (Daniele, 25/09/2026): dicono se la
+# coordinata di una presa sta davvero nel suo comune.
+PERCORSO_CONFINI_COMUNI = Path("project_docs/comuni_confini.geojson")
+# I confini generalizzati hanno un errore di qualche decina di metri.
+TOLLERANZA_CONFINE_COMUNE_M = 100
+_CACHE_COMUNI: dict = {"versione": None, "poligoni": []}
+
+
+def _nome_comune(nome: str) -> str:
+    """'Gambolò' e "GAMBOLO'" -> 'GAMBOLO' (senza accenti, apostrofi, spazi)."""
+    testo = unicodedata.normalize("NFKD", str(nome)).encode("ascii", "ignore").decode()
+    return "".join(c for c in testo.upper() if c.isalnum())
+
+
+def _poligoni_comuni():
+    """[(nome normalizzato, "Nome (SIGLA)", anelli, bbox)], riletti solo se
+    il file cambia; [] se il file non c'e'."""
+    if not PERCORSO_CONFINI_COMUNI.exists():
+        return []
+    st = PERCORSO_CONFINI_COMUNI.stat()
+    versione = (st.st_mtime_ns, st.st_size)
+    if _CACHE_COMUNI["versione"] != versione:
+        dati = json.loads(PERCORSO_CONFINI_COMUNI.read_text(encoding="utf-8"))
+        poligoni = []
+        for f in dati.get("features", []):
+            nome = f["properties"]["comune"]
+            sigla = f["properties"].get("provincia", "")
+            etichetta = f"{nome} ({sigla})" if sigla else nome
+            for parte in f["geometry"]["coordinates"]:
+                anelli = [np.asarray(a, dtype=float)[:, :2] for a in parte if len(a) >= 3]
+                if anelli:
+                    e = anelli[0]
+                    poligoni.append((_nome_comune(nome), etichetta, anelli, (e[:, 0].min(), e[:, 1].min(), e[:, 0].max(), e[:, 1].max())))
+        _CACHE_COMUNI.update(versione=versione, poligoni=poligoni)
+    return _CACHE_COMUNI["poligoni"]
+
+
+def _comune_della_posizione(lat: np.ndarray, lon: np.ndarray) -> list[str]:
+    """"Nome (SIGLA)" del comune in cui cade ogni punto ('' se nessuno)."""
+    esito = [""] * len(lat)
+    libero = np.ones(len(lat), dtype=bool)
+    for _, nome, anelli, (x0, y0, x1, y1) in _poligoni_comuni():
+        idx = np.nonzero(libero & (lon >= x0) & (lon <= x1) & (lat >= y0) & (lat <= y1))[0]
+        if not len(idx):
+            continue
+        dentro = _dentro_anello(lon[idx], lat[idx], anelli[0])
+        for buco in anelli[1:]:
+            dentro &= ~_dentro_anello(lon[idx], lat[idx], buco)
+        for i in idx[dentro]:
+            esito[i] = nome
+        libero[idx[dentro]] = False
+    return esito
+
+
+def _distanza_dal_comune_m(lat: np.ndarray, lon: np.ndarray, comune: str) -> np.ndarray | None:
+    """Distanza di ogni punto dal confine del comune (None se il comune non
+    e' nel file ISTAT)."""
+    chiave = _nome_comune(comune)
+    parti = [anelli for n, _, anelli, _ in _poligoni_comuni() if n == chiave]
+    if not parti:
+        return None
+    distanza = np.full(len(lat), np.inf)
+    lat0 = float(np.mean(lat)) if len(lat) else 45.0
+    for anelli in parti:
+        for anello in anelli:
+            for i in range(0, len(lat), 500):
+                distanza[i:i + 500] = np.minimum(
+                    distanza[i:i + 500], _distanza_anello_m(lon[i:i + 500], lat[i:i + 500], anello, lat0))
+    return distanza
 
 
 def _dentro_e_distanza(lat: np.ndarray, lon: np.ndarray, codice: str) -> tuple[np.ndarray, np.ndarray]:
@@ -508,6 +628,16 @@ def prese_comune(comune: str) -> pd.DataFrame:
     p["LON"] = pd.to_numeric(p["LON"], errors="coerce")
     p["COORD_VALIDE"] = _coordinate_valide(p["LAT"], p["LON"])
 
+    # Distretto della via dallo stradario del comune (se generato). Prima
+    # l'indirizzo, poi la posizione (Daniele, 25/09/2026, Via Trento 21 a
+    # Belgioioso: Neta e via dicono DBLG02, la coordinata sbagliata cade in
+    # DBLG03 e veniva proposto DBLG03): se la via ha un distretto decide la
+    # via, il controllo sulla posizione vale solo per le prese senza.
+    p["DISTRETTO_VIA"] = ""
+    strade = stradario.carica(comune)
+    if not strade.empty:
+        p["DISTRETTO_VIA"] = stradario.distretti_da_via(strade, p["INDIRIZZO"])
+
     # Distretto valido ma posizione che non torna (Daniele, 25/09/2026), per
     # ogni distretto della presa (piu' codici se i servizi non concordano):
     # - presa dentro il confine di un ALTRO distretto (es. a Belgioioso prese
@@ -520,7 +650,7 @@ def prese_comune(comune: str) -> pd.DataFrame:
     # Non si segnala se la presa e' a meno di TOLLERANZA_BORDO_M dal confine
     # del suo distretto (o, senza confine, dal bordo di quello in cui cade).
     con_confine = {c for c, _, _ in _poligoni()}
-    da_controllare = np.nonzero(((p["MOTIVO"] == "") & p["COORD_VALIDE"]).to_numpy())[0]
+    da_controllare = np.nonzero(((p["MOTIVO"] == "") & p["COORD_VALIDE"] & (p["DISTRETTO_VIA"] == "")).to_numpy())[0]
     if len(da_controllare):
         lat = p["LAT"].to_numpy(dtype=float)[da_controllare]
         lon = p["LON"].to_numpy(dtype=float)[da_controllare]
@@ -550,14 +680,10 @@ def prese_comune(comune: str) -> pd.DataFrame:
                     sbagliato[j[profondita > TOLLERANZA_BORDO_M]] = True
         p.loc[p.index[da_controllare[sbagliato]], "MOTIVO"] = "POSIZIONE"
 
-    # Via di un altro distretto (stradario del comune, se generato): il
-    # distretto della via, o del suo tratto di civici, non e' tra quelli
-    # della presa. Anche per prese senza coordinate valide, e trova quelle
-    # con la coordinata sbagliata (Daniele, 25/09/2026).
-    p["DISTRETTO_VIA"] = ""
-    strade = stradario.carica(comune)
+    # Via di un altro distretto: il distretto della via, o del suo tratto di
+    # civici, non e' tra quelli della presa. Anche per prese senza coordinate
+    # valide, e trova quelle con la coordinata sbagliata (Daniele, 25/09/2026).
     if not strade.empty:
-        p["DISTRETTO_VIA"] = stradario.distretti_da_via(strade, p["INDIRIZZO"])
         diversa = np.array([
             m == "" and dv != "" and dv not in att.split(" / ")
             for m, dv, att in zip(p["MOTIVO"], p["DISTRETTO_VIA"], p["DISTRETTO"])
@@ -608,7 +734,7 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     with database.connessione() as conn:
         a = assegnazioni(conn, comune)
     p = p.merge(
-        a[["DP", "DISTRETTO", "UTENTE", "QUANDO"]].rename(columns={
+        a[["DP", "DISTRETTO", "UTENTE", "QUANDO", "VALIDATA"]].rename(columns={
             "DP": "CHIAVE", "DISTRETTO": "CONFERMATO", "UTENTE": "CONFERMATO_DA", "QUANDO": "CONFERMATO_IL",
         }),
         on="CHIAVE", how="left",
@@ -620,23 +746,76 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     lat = p["LAT"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     lon = p["LON"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     proposte = proponi_distretti(lat, lon) if con_proposta else [("", None)] * len(p)
-    p["PROPOSTA"] = [c for c, _ in proposte]
-    p["DISTANZA_M"] = [d for _, d in proposte]
+    # Prima l'indirizzo (stradario), poi la posizione (Daniele, 25/09/2026).
+    # PROPOSTA_DA: 'via e posizione' (d'accordo), 'via', 'posizione'.
+    p["PROPOSTA"] = [dv or c for dv, (c, _) in zip(p["DISTRETTO_VIA"], proposte)]
+    p["DISTANZA_M"] = [None if dv else d for dv, (_, d) in zip(p["DISTRETTO_VIA"], proposte)]
+    p["PROPOSTA_DA"] = [
+        ("via e posizione" if dv == c else "via") if dv else ("posizione" if c else "")
+        for dv, (c, _) in zip(p["DISTRETTO_VIA"], proposte)
+    ]
     # Recepito: Neta ha gia' messo sulla presa il distretto confermato.
     p["RECEPITO"] = p["CONFERMATO"].notna() & (p["DISTRETTO"] == p["CONFERMATO"])
+    # Validata ("mantieni attuale") e ancora con lo stesso distretto in Neta.
+    p["VALIDATA"] = (p["VALIDATA"].fillna(0).astype(int) == 1) & p["RECEPITO"]
+    inviate = invii_per_presa(comune, "distretti")
+    p["N_INVII"] = [inviate.get(k, (0, None))[0] for k in p["CHIAVE"]]
+    p["ULTIMO_INVIO"] = [inviate.get(k, (0, None))[1] for k in p["CHIAVE"]]
     return p
 
 
+_CACHE_RIEPILOGO: dict = {"versione": None, "righe": {}}
+_LOCK_RIEPILOGO = threading.Lock()
+
+
+def _versione_dati() -> tuple:
+    """Cambia quando cambia qualcosa che entra nel riepilogo: anagrafica
+    (caricamento di un'estrazione), conferme, file di
+    riferimento (confini, elenco distretti, stradario, comuni ISTAT)."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        dati = (
+            tuple(conn.execute("SELECT COUNT(*), MAX(AGGIORNATO_IL), MAX(DATA_ESTRAZIONE) FROM anagrafica_servizi").fetchone()),
+            tuple(conn.execute("SELECT COUNT(*), MAX(QUANDO), TOTAL(LENGTH(DISTRETTO || DP) + VALIDATA) FROM prese_assegnazioni").fetchone()),
+        )
+    file = tuple(
+        (p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None
+        for p in (motore_calcolo.PERCORSO_CONFINI_DISTRETTI, motore_calcolo.PERCORSO_MAPPA_DISTRETTI,
+                  stradario.PERCORSO_STRADARIO, PERCORSO_CONFINI_COMUNI)
+    )
+    return dati + file
+
+
 def riepilogo_comuni(comuni: list[str]) -> list[dict]:
-    """Conteggi per la pagina Prese senza comune scelto."""
+    """Conteggi per la pagina Prese senza comune scelto, tenuti in memoria
+    e ricalcolati solo quando cambiano i dati (Daniele, 25/09/2026: prima
+    ~4 s a ogni apertura, ~10 s con le coordinate)."""
+    with _LOCK_RIEPILOGO:
+        versione = _versione_dati()
+        if _CACHE_RIEPILOGO["versione"] != versione:
+            _CACHE_RIEPILOGO.update(versione=versione, righe={})
+        righe = _CACHE_RIEPILOGO["righe"]
+        mancanti = [c for c in comuni if c not in righe]
+        for comune, riga in zip(mancanti, _calcola_riepilogo(mancanti)):
+            righe[comune] = riga
+        return [righe[c] for c in comuni]
+
+
+def aggiorna_riepilogo_in_background(comuni: list[str]) -> None:
+    """Dopo un caricamento (o all'avvio): prepara il riepilogo, cosi' la
+    pagina si apre subito."""
+    threading.Thread(target=lambda: riepilogo_comuni(comuni), daemon=True).start()
+
+
+def _calcola_riepilogo(comuni: list[str]) -> list[dict]:
     righe = []
     for comune in comuni:
         p = prese_da_assegnare(comune, con_proposta=False)
         if p.empty:
             righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0, "VIA": 0,
-                          "confermate": 0, "recepite": 0})
+                          "confermate": 0, "recepite": 0, "validate": 0, "coordinate": 0})
             continue
-        aperte = p[p["MOTIVO"] != ""]
+        aperte = p[(p["MOTIVO"] != "") & ~p["VALIDATA"]]
         righe.append({
             "comune": comune,
             "NODMA": int((aperte["MOTIVO"] == "NODMA").sum()),
@@ -645,8 +824,10 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
             "POSIZIONE": int((aperte["MOTIVO"] == "POSIZIONE").sum()),
             "FUSO": int((aperte["MOTIVO"] == "FUSO").sum()),
             "VIA": int((aperte["MOTIVO"] == "VIA").sum()),
-            "confermate": int(p["CONFERMATO"].notna().sum()),
-            "recepite": int(p["RECEPITO"].sum()),
+            "confermate": int((p["CONFERMATO"].notna() & ~p["VALIDATA"]).sum()),
+            "recepite": int((p["RECEPITO"] & ~p["VALIDATA"]).sum()),
+            "validate": int(p["VALIDATA"].sum()),
+            "coordinate": len(_aperte_in_memoria("coordinate", comune)),
         })
     return righe
 
@@ -654,6 +835,132 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Conferme ed esportazione
 # ---------------------------------------------------------------------------
+
+def fuori_dalla_via(p: pd.DataFrame) -> dict[str, tuple[int, float, float]]:
+    """{chiave presa: (distanza m, lat, lon del punto mediano dei civici
+    vicini)} per le prese la cui coordinata sta lontana dal resto della sua
+    via: oltre DISTANZA_FUORI_VIA_M, o oltre FATTORE_DISPERSIONE_VIA volte
+    la dispersione dei civici vicini se e' maggiore. La distanza e' della
+    singola presa (al civico 24 di Via Molino 8 prese sbagliate e 1 giusta).
+    Il punto di ogni civico vicino e' la mediana delle sue prese."""
+    righe = []
+    for chiave, indirizzo, lat, lon, ok in zip(p["CHIAVE"], p["INDIRIZZO"], p["LAT"], p["LON"], p["COORD_VALIDE"]):
+        via, civico = stradario.normalizza_indirizzo(indirizzo)
+        if ok and via and civico is not None:
+            righe.append((chiave, via, civico, float(lat), float(lon)))
+    if not righe:
+        return {}
+    df = pd.DataFrame(righe, columns=["CHIAVE", "VIA", "CIVICO", "LAT", "LON"])
+    kx = 111_320 * math.cos(math.radians(float(df["LAT"].median())))
+
+    def metri(lat1, lon1, lat2, lon2):
+        return np.hypot((np.asarray(lat1) - lat2) * 110_540, (np.asarray(lon1) - lon2) * kx)
+
+    esito = {}
+    df = df.sort_values(["VIA", "CIVICO"], kind="stable")
+    punti = df.groupby(["VIA", "CIVICO"], sort=True)[["LAT", "LON"]].median()
+    for via, g_punti in punti.groupby(level=0, sort=False):
+        if len(g_punti) < 4:
+            continue
+        civici = g_punti.index.get_level_values(1).to_numpy()
+        plat = g_punti["LAT"].to_numpy()
+        plon = g_punti["LON"].to_numpy()
+        prese_via = df[df["VIA"] == via]
+        per_civico = {c: (grp["CHIAVE"].to_numpy(), grp["LAT"].to_numpy(), grp["LON"].to_numpy())
+                      for c, grp in prese_via.groupby("CIVICO", sort=False)}
+        n = len(civici)
+        for k in range(n):
+            idx = [x for x in range(max(0, k - VICINI_PER_LATO), min(n, k + 1 + VICINI_PER_LATO)) if x != k]
+            if len(idx) < 3:
+                continue
+            c_lat = float(np.median(plat[idx]))
+            c_lon = float(np.median(plon[idx]))
+            dispersione = float(np.median(metri(plat[idx], plon[idx], c_lat, c_lon)))
+            soglia = max(DISTANZA_FUORI_VIA_M, FATTORE_DISPERSIONE_VIA * dispersione)
+            chiavi, la, lo = per_civico[civici[k]]
+            for chiave, d in zip(chiavi, metri(la, lo, c_lat, c_lon)):
+                if d > soglia:
+                    esito[chiave] = (int(round(d)), round(c_lat, 6), round(c_lon, 6))
+    return esito
+
+
+def distanze_da_via_osm(p: pd.DataFrame, comune: str) -> tuple[dict[str, float], set[str]]:
+    """({chiave presa: distanza m dal tracciato OSM della sua via}, vie Neta
+    abbinate a OSM). Solo prese con coordinate valide e via abbinata; se il
+    file OSM manca o il comune non c'e', ({}, set())."""
+    osm = vie_osm.vie_comune(comune)
+    if not osm:
+        return {}, set()
+    v = p[p["COORD_VALIDE"]]
+    vie = pd.Series([stradario.normalizza_indirizzo(i)[0] for i in v["INDIRIZZO"]], index=v.index)
+    abbinate = vie_osm.abbina(sorted(set(vie) - {""}), list(osm))
+    esito = {}
+    for via, nome in abbinate.items():
+        m = (vie == via).to_numpy()
+        d = vie_osm.distanza_m(v["LAT"].to_numpy(dtype=float)[m], v["LON"].to_numpy(dtype=float)[m], osm[nome])
+        esito.update(zip(v["CHIAVE"].to_numpy()[m], d))
+    return esito, set(abbinate)
+
+
+def coordinate_sbagliate_per_via(p: pd.DataFrame, comune: str) -> dict[str, tuple[str, int | None, float | None, float | None]]:
+    """{chiave: (motivo, distanza, lat proposta, lon proposta)} per le prese
+    con la coordinata lontana dalla sua via. Dove la via e' abbinata a OSM
+    decide OSM (oltre DISTANZA_MAX_DA_VIA_OSM_M); altrimenti il confronto con
+    i civici vicini (fuori_dalla_via). La coordinata proposta e' il punto
+    mediano dei civici vicini, se c'e'."""
+    d_osm, abbinate = distanze_da_via_osm(p, comune)
+    vicini = fuori_dalla_via(p)
+    esito = {}
+    for chiave, indirizzo in zip(p["CHIAVE"], p["INDIRIZZO"]):
+        via = stradario.normalizza_indirizzo(indirizzo)[0]
+        prop = vicini.get(chiave, (None, None, None))[1:]
+        if via in abbinate:
+            d = d_osm.get(chiave)
+            if d is not None and d > DISTANZA_MAX_DA_VIA_OSM_M:
+                esito[chiave] = ("Lontana dalla sua via (OpenStreetMap)", int(round(d)), *prop)
+        elif chiave in vicini:
+            esito[chiave] = ("Lontana dal resto della via", vicini[chiave][0], *prop)
+    return esito
+
+
+def distretti_osm_per_via(comune: str, vie_neta: list[str]) -> dict[str, tuple[str, str]]:
+    """{via Neta: (nome OSM, 'DBLG02 100%' o 'DBLG02 70%, DBLG03 30%')}: i
+    distretti che il tracciato OSM della via attraversa, in proporzione alla
+    lunghezza (punti ogni ~15 m). Indipendente dalle coordinate di Neta:
+    serve a controllare lo stradario."""
+    osm = vie_osm.vie_comune(comune)
+    if not osm:
+        return {}
+    abbinate = vie_osm.abbina(vie_neta, list(osm))
+    esito = {}
+    for via, nome in abbinate.items():
+        punti = []
+        for tr in osm[nome]:
+            for (x1, y1), (x2, y2) in zip(tr[:-1], tr[1:]):
+                lung = math.hypot((x2 - x1) * 111_320 * math.cos(math.radians(y1)), (y2 - y1) * 110_540)
+                n = max(1, int(lung // 15))
+                punti += [(y1 + (y2 - y1) * k / n, x1 + (x2 - x1) * k / n) for k in range(n)]
+        if not punti:
+            continue
+        arr = np.asarray(punti)
+        dove = [d or "fuori" for d in _dentro_confini(arr[:, 0], arr[:, 1])]
+        conta = collections.Counter(dove).most_common()
+        esito[via] = (nome, ", ".join(f"{d} {round(100 * c / len(dove))}%" for d, c in conta if 100 * c / len(dove) >= 3))
+    return esito
+
+
+def coordinate_condivise(p: pd.DataFrame) -> dict[str, int]:
+    """{chiave presa: numero di vie} per le prese la cui coordinata (al
+    metro) e' usata anche da prese di altre vie: una coordinata segnaposto,
+    non la posizione vera (vedi MIN_VIE_COORDINATA_CONDIVISA)."""
+    v = p[p["COORD_VALIDE"]]
+    if v.empty:
+        return {}
+    vie = [stradario.normalizza_indirizzo(i)[0] for i in v["INDIRIZZO"]]
+    punto = list(zip(v["LAT"].round(5), v["LON"].round(5)))
+    n_vie = pd.Series(vie).groupby(pd.Series(punto)).nunique()
+    return {k: int(n_vie[pt]) for k, pt in zip(v["CHIAVE"], punto) if n_vie[pt] >= MIN_VIE_COORDINATA_CONDIVISA}
+
 
 def genera_stradario(comune: str) -> pd.DataFrame:
     """Genera (una tantum) lo stradario del comune dalla posizione delle
@@ -673,6 +980,10 @@ def genera_stradario(comune: str) -> pd.DataFrame:
         j = np.nonzero(dentro == codice)[0]
         _, profondita = _dentro_e_distanza(lat[j], lon[j], codice)
         pos[validi[j[profondita > TOLLERANZA_BORDO_M]]] = codice
+    # Le prese con la coordinata lontana dal resto della via o segnaposto
+    # non votano.
+    escluse = set(coordinate_sbagliate_per_via(p, comune)) | set(coordinate_condivise(p))
+    pos[[i for i, k in enumerate(p["CHIAVE"]) if k in escluse]] = ""
     pos = list(pos)
     nuovo = stradario.genera_stradario(p, pos, comune)
     stradario.salva(comune, nuovo)
@@ -690,20 +1001,114 @@ def distretti_del_comune(comune: str) -> set[str]:
     }
 
 
+def _scala(valore: float, cifre_intere: int) -> float:
+    """8742620 -> 8.742620 (cifre_intere=1), 4531012 -> 45.31012 (2): la
+    virgola persa nell'estrazione."""
+    intere = len(str(int(abs(valore))))
+    return valore / 10 ** (intere - cifre_intere)
+
+
+def _coordinata_non_valida(lat, lon, comune: str) -> tuple[str, tuple[float, float] | None]:
+    """Descrive una coordinata fuori dall'area valida e, se e' un errore di
+    formato riconoscibile (virgola persa, latitudine e longitudine
+    invertite), propone quella corretta dicendo dove cadrebbe (Daniele,
+    25/09/2026: a settembre 2026 824 mancanti, 9 senza virgola, 1 invertita,
+    le altre in altre regioni)."""
+    if pd.isna(lat) or pd.isna(lon):
+        return "Coordinate mancanti", None
+    lat, lon = float(lat), float(lon)
+    if lat == 0 and lon == 0:
+        return "Coordinate a 0,0", None
+    candidati = []
+    if abs(lat) > 1000 or abs(lon) > 1000:
+        candidati.append(("Virgola mancante", (_scala(lat, 2) if abs(lat) > 1000 else lat, _scala(lon, 1) if abs(lon) > 1000 else lon)))
+    candidati.append(("Latitudine e longitudine invertite", (lon, lat)))
+    for motivo, (la, lo) in candidati:
+        if LAT_VALIDA[0] <= la <= LAT_VALIDA[1] and LON_VALIDA[0] <= lo <= LON_VALIDA[1]:
+            dove = _comune_della_posizione(np.array([la]), np.array([lo]))[0]
+            if _nome_comune(dove.split(" (")[0]) == _nome_comune(comune):
+                return f"{motivo}: corretta cadrebbe nel comune", (round(la, 6), round(lo, 6))
+            return f"{motivo}: corretta cadrebbe in {dove or 'un comune lontano'}", (round(la, 6), round(lo, 6))
+    return f"Coordinate fuori provincia ({lat:.4f}, {lon:.4f})", None
+
+
 def coordinate_da_verificare(comune: str) -> pd.DataFrame:
     """Prese del comune con coordinate da far verificare a Neta (Daniele,
     25/09/2026), ricalcolate a ogni estrazione indipendentemente dalle
     conferme del distretto: una presa resta qui finche' Neta non corregge
     la coordinata. PROBLEMA: mancanti o fuori provincia; dentro un distretto
     di un altro comune; a piu' di DISTANZA_FUORI_COMUNE_M dai distretti del
-    comune; lontana dal distretto della sua via (stradario), cioe' con ogni
-    probabilita' la coordinata e' di un altro posto."""
+    comune; coordinata segnaposto (stesso punto per piu' vie); lontana dal
+    resto della sua via (vedi fuori_dalla_via, con la coordinata mediana dei
+    civici vicini come proposta). Se ci sono i confini
+    ISTAT del comune, "fuori comune" viene da quelli e sostituisce le due
+    regole sui distretti (dentro un distretto di altro comune, lontana dai
+    distretti del comune). La regola "lontana dal distretto della sua
+    via" e' stata tolta: sulle strade lunghe (Via Emilia, Via Piacenza,
+    frazioni) segnalava le case sparse lungo la stessa via (~970 falsi
+    allarmi con lo stradario di tutti i comuni)."""
     p = prese_comune(comune)
     if p.empty:
         return p
     problema = pd.Series("", index=p.index)
     distanza = pd.Series(np.nan, index=p.index)
-    problema[~p["COORD_VALIDE"]] = "Coordinate mancanti o fuori provincia"
+    lat_c = pd.Series(np.nan, index=p.index)
+    lon_c = pd.Series(np.nan, index=p.index)
+    for i in np.nonzero(~p["COORD_VALIDE"].to_numpy())[0]:
+        testo, corretta = _coordinata_non_valida(p["LAT"].iloc[i], p["LON"].iloc[i], comune)
+        problema.iloc[i] = testo
+        if corretta:
+            lat_c.iloc[i], lon_c.iloc[i] = corretta
+
+    # Con i confini ISTAT: fuori dal territorio comunale (oltre la
+    # tolleranza dei confini generalizzati) al posto della distanza dai
+    # distretti, che segnalava anche case sparse legittime in campagna.
+    v_tutti = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
+    istat = None
+    if len(v_tutti):
+        lat_v = p["LAT"].to_numpy(dtype=float)[v_tutti]
+        lon_v = p["LON"].to_numpy(dtype=float)[v_tutti]
+        dist_comune = _distanza_dal_comune_m(lat_v, lon_v, comune)
+        if dist_comune is not None:
+            istat = True
+            dove = _comune_della_posizione(lat_v, lon_v)
+            for k, i in enumerate(v_tutti):
+                if _nome_comune(dove[k].split(" (")[0]) != _nome_comune(comune) and dist_comune[k] > TOLLERANZA_CONFINE_COMUNE_M:
+                    problema.iloc[i] = f"Fuori dal comune: cade in {dove[k] or 'un comune lontano'}"
+                    distanza.iloc[i] = round(dist_comune[k])
+
+    condivise = coordinate_condivise(p)
+    fuori = coordinate_sbagliate_per_via(p, comune)
+    for i, chiave in enumerate(p["CHIAVE"]):
+        if problema.iloc[i]:
+            continue
+        if chiave in condivise:
+            problema.iloc[i] = f"Coordinata segnaposto: stesso punto per prese di {condivise[chiave]} vie diverse"
+        elif chiave in fuori:
+            motivo, d, la, lo = fuori[chiave]
+            problema.iloc[i] = motivo
+            distanza.iloc[i] = d
+            if la is not None:
+                lat_c.iloc[i], lon_c.iloc[i] = la, lo
+
+    # Coordinata in un distretto diverso da quello della sua via, oltre la
+    # tolleranza dal confine: con "prima l'indirizzo" il distretto non si
+    # segnala, ma la coordinata va corretta.
+    dv_col = p["DISTRETTO_VIA"].to_numpy()
+    j = np.nonzero((problema == "").to_numpy() & p["COORD_VALIDE"].to_numpy() & (dv_col != ""))[0]
+    if len(j):
+        la = p["LAT"].to_numpy(dtype=float)[j]
+        lo = p["LON"].to_numpy(dtype=float)[j]
+        dove = np.array(_dentro_confini(la, lo), dtype=object)
+        for dv in set(dv_col[j]):
+            k = np.nonzero((dv_col[j] == dv) & (dove != "") & (dove != dv))[0]
+            if not len(k):
+                continue
+            dentro, dist = _dentro_e_distanza(la[k], lo[k], dv)
+            for kk, d_in, d in zip(k, dentro, dist):
+                if not d_in and d > TOLLERANZA_BORDO_M:
+                    problema.iloc[j[kk]] = f"Cade in {dove[kk]}, ma la via e' {dv}"
+                    distanza.iloc[j[kk]] = round(d)
 
     propri = distretti_del_comune(comune) & {c for c, _, _ in _poligoni()}
     elenco = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")["comune_ufficiale"]
@@ -717,6 +1122,8 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
             dentro, dist = _dentro_e_distanza(lat, lon, codice)
             minima = np.minimum(minima, np.where(dentro, 0, dist))
         for k, i in enumerate(v):
+            if istat:
+                break  # fuori comune gia' deciso dai confini ISTAT
             if pos[k] and pos[k] not in propri:
                 problema.iloc[i] = f"Dentro un distretto di un altro comune ({pos[k]}, {elenco.get(pos[k], '') or '?'})"
                 distanza.iloc[i] = round(minima[k])
@@ -724,17 +1131,7 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
                 problema.iloc[i] = "Lontana dai distretti del comune"
                 distanza.iloc[i] = round(minima[k])
 
-        # Coordinata lontana dal distretto della via (oltre la distanza di
-        # proposta): l'indirizzo dice una zona, il punto un'altra.
-        con_via = [k for k, i in enumerate(v) if not problema.iloc[i] and p["DISTRETTO_VIA"].iloc[i]]
-        for dv in {p["DISTRETTO_VIA"].iloc[v[k]] for k in con_via}:
-            ks = np.array([k for k in con_via if p["DISTRETTO_VIA"].iloc[v[k]] == dv])
-            dentro, dist = _dentro_e_distanza(lat[ks], lon[ks], dv)
-            for k, d_in, d in zip(ks, dentro, dist):
-                if not d_in and d > DISTANZA_MAX_PROPOSTA_M:
-                    problema.iloc[v[k]] = f"Lontana dal distretto della sua via ({dv})"
-                    distanza.iloc[v[k]] = round(d)
-    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza)
+    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c)
     return p[p["PROBLEMA"] != ""].reset_index(drop=True)
 
 
@@ -745,6 +1142,7 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
         "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
         "PROBLEMA": "Problema", "DISTANZA_M": "Distanza (m)", "LAT": "Latitudine", "LON": "Longitudine",
+        "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
     }
     if parti:
         df = pd.concat(parti, ignore_index=True)
@@ -764,34 +1162,183 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
     return buffer.getvalue()
 
 
+# ---------------------------------------------------------------------------
+# Registro degli invii a Neta
+# ---------------------------------------------------------------------------
+
+def invii_per_presa(comune: str, tipo: str) -> dict[str, tuple[int, str]]:
+    """{chiave presa: (quante volte inviata, data ultimo invio)} per il comune."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        return {
+            chiave: (n, ultimo) for chiave, n, ultimo in conn.execute("""
+                SELECT p.CHIAVE, COUNT(*), MAX(i.QUANDO) FROM invii_neta_prese p
+                JOIN invii_neta i ON i.ID = p.ID_INVIO
+                WHERE p.LOCALITA = ? AND i.TIPO = ? GROUP BY p.CHIAVE""", (comune.strip().upper(), tipo))
+        }
+
+
+def _da_inviare(tipo: str, comune: str) -> pd.DataFrame:
+    """Prese del comune da mettere nel file per Neta: conferme non ancora
+    recepite, oppure coordinate da verificare. Colonna VALORE = cosa si
+    chiede a Neta (distretto, o il problema della coordinata)."""
+    if tipo == "distretti":
+        p = prese_da_assegnare(comune)
+        if p.empty:
+            return p
+        p = p[p["CONFERMATO"].notna() & ~p["RECEPITO"]]
+        return p.assign(VALORE=p["CONFERMATO"])
+    p = coordinate_da_verificare(comune)
+    return p if p.empty else p.assign(VALORE=p["PROBLEMA"])
+
+
+def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int, bytes]:
+    """Prepara il file per Neta (solo cio' che e' ancora aperto) e registra
+    l'invio. Restituisce (id invio, prese, Excel). Nel file: quante volte
+    ogni presa era gia' stata inviata e quando la prima volta, per i
+    solleciti."""
+    if tipo not in ("distretti", "coordinate"):
+        raise ValueError("Tipo di invio sconosciuto.")
+    parti = []
+    for comune in comuni:
+        p = _da_inviare(tipo, comune)
+        if p.empty:
+            continue
+        with database.connessione() as conn:
+            assicura_tabelle(conn)
+            prima = {
+                chiave: (n, primo) for chiave, n, primo in conn.execute("""
+                    SELECT p.CHIAVE, COUNT(*), MIN(i.QUANDO) FROM invii_neta_prese p
+                    JOIN invii_neta i ON i.ID = p.ID_INVIO
+                    WHERE p.LOCALITA = ? AND i.TIPO = ? GROUP BY p.CHIAVE""", (comune.strip().upper(), tipo))
+            }
+        parti.append(p.assign(
+            COMUNE=comune.strip().upper(),
+            N_PRIMA=[prima.get(k, (0, ""))[0] for k in p["CHIAVE"]],
+            PRIMO_INVIO=[(prima.get(k, (0, ""))[1] or "")[:10] for k in p["CHIAVE"]],
+        ))
+    if not parti:
+        raise ValueError("Niente da inviare: nessuna presa aperta per questi comuni.")
+    df = pd.concat(parti, ignore_index=True)
+    adesso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        cur = conn.execute(
+            "INSERT INTO invii_neta (QUANDO, UTENTE, TIPO, COMUNI, N_PRESE) VALUES (?,?,?,?,?)",
+            (adesso, utente, tipo, ", ".join(sorted(df["COMUNE"].unique())), len(df)),
+        )
+        id_invio = cur.lastrowid
+        conn.executemany(
+            "INSERT INTO invii_neta_prese VALUES (?,?,?,?,?,?)",
+            [(id_invio, r.COMUNE, r.CHIAVE, r.VALORE, _numero(r.LAT), _numero(r.LON)) for r in df.itertuples(index=False)],
+        )
+        conn.commit()
+
+    df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
+    df["INVIATA_PRIMA"] = [f"{n} volte, la prima il {d}" if n else "" for n, d in zip(df["N_PRIMA"], df["PRIMO_INVIO"])]
+    comuni_col = {
+        "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
+        "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
+    }
+    if tipo == "distretti":
+        colonne = {**comuni_col, "VALORE": "Distretto da assegnare", "INVIATA_PRIMA": "Gia' inviata",
+                   "LAT": "Latitudine", "LON": "Longitudine"}
+    else:
+        colonne = {**comuni_col, "VALORE": "Problema", "DISTANZA_M": "Distanza (m)", "INVIATA_PRIMA": "Gia' inviata",
+                   "LAT": "Latitudine", "LON": "Longitudine",
+                   "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)"}
+    return id_invio, len(df), _excel(df[list(colonne)].rename(columns=colonne), "Distretti" if tipo == "distretti" else "Coordinate")
+
+
+def _excel(df: pd.DataFrame, foglio_nome: str) -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=foglio_nome)
+        foglio = writer.sheets[foglio_nome]
+        for i, col in enumerate(df.columns, start=1):
+            larghezza = min(60, max(10, len(col) + 2, *(len(str(v)) + 2 for v in df[col].head(500))))
+            foglio.column_dimensions[foglio.cell(row=1, column=i).column_letter].width = larghezza
+        foglio.freeze_panes = "A2"
+        foglio.auto_filter.ref = foglio.dimensions
+    return buffer.getvalue()
+
+
+def elenco_invii(limite: int = 50) -> list[dict]:
+    """Invii registrati, dal piu' recente, con quante prese sono ancora
+    aperte oggi (conferma non recepita, o coordinata ancora da verificare)
+    e quante risolte da Neta."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        invii = pd.read_sql("SELECT * FROM invii_neta ORDER BY ID DESC LIMIT ?", conn, params=(limite,))
+        if invii.empty:
+            return []
+        prese_inviate = pd.read_sql(
+            f"SELECT ID_INVIO, LOCALITA, CHIAVE FROM invii_neta_prese WHERE ID_INVIO IN ({','.join('?' * len(invii))})",
+            conn, params=[int(i) for i in invii["ID"]])
+    aperte: dict[tuple[str, str], set[str]] = {}
+    for tipo, comune in {(r.TIPO, c) for r in invii.itertuples() for c in set(
+            prese_inviate.loc[prese_inviate["ID_INVIO"] == r.ID, "LOCALITA"])}:
+        aperte[(tipo, comune)] = set(_aperte_in_memoria(tipo, comune))
+    righe = []
+    for r in invii.itertuples(index=False):
+        mie = prese_inviate[prese_inviate["ID_INVIO"] == r.ID]
+        ancora = sum(k in aperte.get((r.TIPO, c), set()) for c, k in zip(mie["LOCALITA"], mie["CHIAVE"]))
+        righe.append({
+            "id": int(r.ID), "quando": r.QUANDO[:16], "utente": r.UTENTE, "tipo": r.TIPO, "comuni": r.COMUNI,
+            "n_prese": int(r.N_PRESE), "aperte": int(ancora), "risolte": int(r.N_PRESE - ancora),
+        })
+    return righe
+
+
+_CACHE_APERTE: dict = {"versione": None, "dati": {}}
+
+
+def _aperte_in_memoria(tipo: str, comune: str) -> list[str]:
+    """Chiavi delle prese ancora aperte per tipo e comune, in memoria finche'
+    i dati non cambiano (le coordinate di tutti i comuni costano secondi)."""
+    versione = _versione_dati()
+    if _CACHE_APERTE["versione"] != versione:
+        _CACHE_APERTE.update(versione=versione, dati={})
+    chiave = (tipo, comune)
+    if chiave not in _CACHE_APERTE["dati"]:
+        p = _da_inviare(tipo, comune)
+        _CACHE_APERTE["dati"][chiave] = [] if p.empty else list(p["CHIAVE"])
+    return _CACHE_APERTE["dati"][chiave]
+
+
 def distretti_noti() -> set[str]:
     codici = set(motore_calcolo.carica_mappa_distretti_df()["codice_distretto"].str.upper())
     return codici | {c.upper() for c, _, _ in _poligoni()}
 
 
-def salva_assegnazioni(comune: str, voci: list[tuple[str, str]], utente: str) -> tuple[int, int]:
-    """voci = [(chiave presa, distretto)]; distretto vuoto = togli la
-    conferma. Restituisce (salvate, tolte). Codici sconosciuti rifiutati."""
+def salva_assegnazioni(comune: str, voci: list[tuple], utente: str) -> tuple[int, int]:
+    """voci = [(chiave presa, distretto)] o [(chiave, distretto, validata)];
+    distretto vuoto = togli la conferma. validata = "mantieni attuale": il
+    distretto e' quello che la presa ha gia' (anche NO DISTRETTO), accettato
+    anche se non e' nell'elenco distretti. Restituisce (salvate, tolte).
+    Codici sconosciuti rifiutati."""
     noti = distretti_noti()
     comune = comune.strip().upper()
     adesso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     salvate = tolte = 0
     with database.connessione() as conn:
         assicura_tabelle(conn)
-        for chiave, distretto in voci:
+        for voce in voci:
+            chiave, distretto = voce[0], voce[1]
+            validata = bool(voce[2]) if len(voce) > 2 else False
             distretto = (distretto or "").strip().upper()
             if not distretto:
                 tolte += conn.execute(
                     "DELETE FROM prese_assegnazioni WHERE LOCALITA=? AND DP=?", (comune, chiave)
                 ).rowcount
                 continue
-            if distretto not in noti:
+            if not validata and distretto not in noti:
                 raise ValueError(f"Distretto '{distretto}' non presente nell'elenco distretti né nei confini.")
             conn.execute(
-                "INSERT INTO prese_assegnazioni VALUES (?,?,?,?,?) "
+                "INSERT INTO prese_assegnazioni (LOCALITA, DP, DISTRETTO, UTENTE, QUANDO, VALIDATA) VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(LOCALITA, DP) DO UPDATE SET DISTRETTO=excluded.DISTRETTO, "
-                "UTENTE=excluded.UTENTE, QUANDO=excluded.QUANDO",
-                (comune, chiave, distretto, utente, adesso),
+                "UTENTE=excluded.UTENTE, QUANDO=excluded.QUANDO, VALIDATA=excluded.VALIDATA",
+                (comune, chiave, distretto, utente, adesso, int(validata)),
             )
             salvate += 1
         conn.commit()
@@ -808,7 +1355,8 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         if p.empty:
             continue
         if solo_confermate:
-            p = p[p["CONFERMATO"].notna()]
+            # Le validate ("mantieni attuale") non chiedono niente a Neta.
+            p = p[p["CONFERMATO"].notna() & ~p["VALIDATA"]]
         if p.empty:
             continue
         p = p.assign(COMUNE=comune)
@@ -818,7 +1366,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
         "DISTRETTO": "Distretto attuale", "MOTIVO_TESTO": "Motivo",
         "CONFERMATO": "Distretto da assegnare", "STATO": "Stato",
-        "PROPOSTA": "Distretto proposto (posizione)", "PROPOSTA_COME": "Come",
+        "PROPOSTA": "Distretto proposto", "PROPOSTA_DA": "Proposto da", "PROPOSTA_COME": "Posizione",
         "DISTRETTO_VIA": "Distretto della via (stradario)",
         "CONFERMATO_DA": "Confermato da", "CONFERMATO_IL": "Confermato il",
         "LAT": "Latitudine", "LON": "Longitudine",
@@ -828,12 +1376,13 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
         df["MOTIVO_TESTO"] = df["MOTIVO"].map(MOTIVI).fillna("")
         df["STATO"] = np.where(
-            df["RECEPITO"], "Già recepito da Neta",
-            np.where(df["CONFERMATO"].notna(), "Da recepire", "Da verificare"),
+            df["VALIDATA"], "Validata: distretto attuale corretto",
+            np.where(df["RECEPITO"], "Già recepito da Neta",
+            np.where(df["CONFERMATO"].notna(), "Da recepire", "Da verificare")),
         )
         df["PROPOSTA_COME"] = [
-            "" if not prop else ("dentro il confine" if pd.isna(d) else f"fuori, a {int(d)} m")
-            for prop, d in zip(df["PROPOSTA"], df["DISTANZA_M"])
+            "" if not prop or da.startswith("via") else ("dentro il confine" if pd.isna(d) else f"fuori, a {int(d)} m")
+            for prop, d, da in zip(df["PROPOSTA"], df["DISTANZA_M"], df["PROPOSTA_DA"])
         ]
         df.loc[~df["COORD_VALIDE"], "PROPOSTA_COME"] = "coordinate non valide"
         df = df[list(colonne)].rename(columns=colonne)

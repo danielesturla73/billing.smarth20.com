@@ -209,6 +209,10 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
             accessi.ip_client(request),
         )
 
+    if archivi_aggiornati:
+        # Conteggi del tab Prese pronti per la prossima apertura.
+        prese.aggiorna_riepilogo_in_background(_comuni_disponibili())
+
     for r in risultati_file:
         if r["errore"]:
             auth.registra(
@@ -1429,6 +1433,8 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
     }
     if not comune:
         contesto["riepilogo"] = [] if contesto["ricostruzione"]["in_corso"] else prese.riepilogo_comuni(comuni_disponibili)
+        contesto["invii"] = prese.elenco_invii()
+        contesto["puo_modificare"] = request.state.utente["ruolo"] in ("editor", "admin")
         return templates.TemplateResponse(request, "prese.html", contesto)
 
     trovato = next((c for c in comuni_disponibili if c.strip().upper() == comune.strip().upper()), None)
@@ -1438,6 +1444,9 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
 
     if contesto["vista"] == "stradario":
         s = stradario.carica(trovato)
+        osm = prese.distretti_osm_per_via(trovato, sorted(set(s["via"]))) if not s.empty else {}
+        s["osm_nome"] = [osm.get(v, ("", ""))[0] for v in s["via"]]
+        s["osm_distretti"] = [osm.get(v, ("", ""))[1] for v in s["via"]]
         contesto.update(
             puo_modificare=request.state.utente["ruolo"] in ("editor", "admin"),
             stradario=[
@@ -1481,7 +1490,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         contesto["righe"] = _punti_json(da_fare, [
             "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
             "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
-            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA",
+            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA",
         ])
     return templates.TemplateResponse(request, "prese.html", contesto)
 
@@ -1493,7 +1502,8 @@ async def prese_assegna(request: Request):
     Solo editor/admin (middleware: ogni POST)."""
     corpo = await request.json()
     comune = str(corpo.get("comune", "")).strip()
-    voci = [(str(v.get("chiave", "")).strip(), str(v.get("distretto", ""))) for v in corpo.get("voci", [])]
+    voci = [(str(v.get("chiave", "")).strip(), str(v.get("distretto", "")), bool(v.get("validata")))
+            for v in corpo.get("voci", [])]
     voci = [v for v in voci if v[0]]
     if not comune or not voci:
         raise HTTPException(status_code=400, detail="Comune o prese mancanti.")
@@ -1501,7 +1511,7 @@ async def prese_assegna(request: Request):
         salvate, tolte = prese.salva_assegnazioni(comune, voci, request.state.utente["username"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    dettaglio = ", ".join(f"{k}→{d.strip().upper() or '(tolta)'}" for k, d in voci[:20])
+    dettaglio = ", ".join(f"{k}→{d.strip().upper() or '(tolta)'}{' (mantieni attuale)' if val else ''}" for k, d, val in voci[:20])
     if len(voci) > 20:
         dettaglio += f" … (+{len(voci) - 20})"
     auth.registra(
@@ -1529,6 +1539,43 @@ async def prese_stradario(request: Request):
         f"{comune}: {nuovo['via'].nunique()} vie, {len(nuovo)} righe, {a_cavallo} a cavallo", accessi.ip_client(request),
     )
     return {"vie": int(nuovo["via"].nunique()), "righe": len(nuovo), "a_cavallo": a_cavallo}
+
+
+@app.post("/prese/invio")
+async def prese_invio(request: Request):
+    """Registra un invio a Neta e scarica il file da mandare: form con tipo
+    ('distretti' = conferme non ancora recepite, 'coordinate' = coordinate
+    da verificare) e comune (vuoto = tutti). Solo editor/admin."""
+    form = await request.form()
+    tipo = str(form.get("tipo", ""))
+    comune = str(form.get("comune", "")).strip().upper()
+    comuni = [comune] if comune else _comuni_disponibili()
+    try:
+        id_invio, n, contenuto = prese.registra_invio(tipo, comuni, request.state.utente["username"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    auth.registra(
+        request.state.utente["username"], "prese_invio_neta",
+        f"invio {id_invio}, {tipo}, {comune or 'tutti i comuni'}: {n} prese", accessi.ip_client(request),
+    )
+    nome = f"neta_{tipo}_{comune.replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}_invio{id_invio}.xlsx"
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get("/mappe/confini-comuni.geojson")
+def confini_comuni_geojson():
+    """Confini dei comuni ISTAT per lo strato attivabile delle mappe (vedi
+    static/confini_comuni.js); il file e' in project_docs/."""
+    if not prese.PERCORSO_CONFINI_COMUNI.exists():
+        raise HTTPException(status_code=404, detail="Confini dei comuni non disponibili.")
+    return Response(
+        content=prese.PERCORSO_CONFINI_COMUNI.read_bytes(), media_type="application/geo+json",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
 
 
 @app.get("/prese/coordinate")

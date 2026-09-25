@@ -100,4 +100,47 @@
       a ogni caricamento: l'archivio letture, a parità di lettura, teneva la riga vecchia).</li>
   </ul>
 </div>
+
+<div class="panel storia-voce">
+  <div class="data">25/09/2026</div>
+  <h2>Distretti soppressi uniti nel calcolo</h2>
+  <ul>
+    <li>DVH02 e DVH03 fusi in DVH05, DCT04 e DCT07 fusi in DCT13. Il calcolo li unisce al distretto nuovo anche per
+      i mesi passati, finché Neta non corregge il gestionale. Import_WMS cambia per Voghera e Casteggio: DVH05 passa
+      da 1.566.713 a 1.719.539 m³, DCT13 da 0 a 30.912 m³. I totali dei comuni restano uguali.</li>
+    <li>Nel tab Prese le prese di questi distretti sono associate in automatico al distretto nuovo e vanno nel file
+      per Neta (colonne distretto attuale → distretto da assegnare).</li>
+  </ul>
+</div>
+
+<div class="panel storia-voce">
+  <div class="data">25/09/2026</div>
+  <h2>Prese: stradario, OpenStreetMap, coordinate da verificare, invii a Neta</h2>
+  <ul>
+    <li>Nuovo motivo "Diverso dalla posizione", con 30 m di tolleranza dal confine. Riguarda anche le prese fuori da
+      ogni confine a più di 300 m dal loro distretto.</li>
+    <li><strong>Stradario via → distretto</strong> per tutti i comuni e nuovo motivo "Via di altro distretto". Il caso
+      Via Molino a Belgioioso ha mostrato che le coordinate di Neta non sono affidabili: le 8 prese del civico 24
+      avevano tutte la stessa coordinata, a circa 1 km dalla via, e lo stradario ne faceva un'eccezione DBLG03. Ora
+      conta un voto per civico e non votano le prese lontane dalla loro via né quelle con coordinata segnaposto.
+      Via Molino e Via Trieste risultano tutte DBLG02.</li>
+    <li><strong>Prima l'indirizzo, poi la posizione</strong> (caso Via Trento 21): se Neta e via concordano il
+      distretto non si segnala e va corretta la coordinata. "Diverso dalla posizione" scende da circa 1.400 a circa 100
+      prese, "Via di altro distretto" sale a circa 1.200.</li>
+    <li><strong>Vie di OpenStreetMap</strong> per i 22 comuni, abbinate ai nomi Neta: l'88% delle vie, tutte tranne
+      cascine, frazioni e vie assenti in OSM. Lo stradario è coerente con OSM tranne 21 righe, in rosso nel
+      sotto-tab Stradario.</li>
+    <li><strong>Confini dei comuni ISTAT</strong> (01/01/2025) per dire se una coordinata sta davvero nel suo comune.</li>
+    <li><strong>File "coordinate da verificare"</strong> per Neta, con circa 6.500 prese: circa 3.800 lontane dalla via in
+      OSM, 824 senza coordinate, 730 fuori dal comune, 589 con coordinata segnaposto, e in più virgole mancanti e
+      coordinate invertite, con la coordinata corretta proposta.</li>
+    <li><strong>Registro degli invii a Neta</strong>: cosa è stato mandato, quando e da chi, quanto è stato risolto e
+      cosa sollecitare.</li>
+    <li>Tooltip della mappa allineato all'elenco, riepilogo Prese tenuto in memoria (si apre in meno di un secondo)
+      e preparato dopo ogni caricamento.</li>
+    <li><strong>Mantieni attuale</strong>: per i falsi allarmi si conferma il distretto che la presa ha già, e la presa
+      diventa validata: esce dal conteggio delle aperte e dal file per Neta.</li>
+    <li>Confini dei comuni ISTAT attivabili in tutte le mappe (menu dei livelli).</li>
+  </ul>
+</div>
 {% endblock %}

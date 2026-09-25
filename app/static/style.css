@@ -483,3 +483,10 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
 }
 .leaflet-tooltip.etichetta-distretto::before { display: none; }
 .leaflet-container { font-family: var(--font); }
+
+/* Nome del comune sullo strato "Confini comuni (ISTAT)" */
+.etichetta-comune {
+  background: transparent; border: none; box-shadow: none;
+  color: #7A3E9D; font-weight: 600; font-size: 12px; text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+}
+.etichetta-comune::before { display: none; }

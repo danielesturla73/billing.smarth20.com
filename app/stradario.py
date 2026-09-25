@@ -179,7 +179,7 @@ def salva(comune: str, nuovo: pd.DataFrame) -> None:
     """Sostituisce le righe del comune nel CSV, lasciando gli altri comuni."""
     tutto = carica()
     tutto = tutto[tutto["comune"].str.strip().str.upper() != comune.strip().upper()]
-    tutto = pd.concat([tutto, nuovo[COLONNE]], ignore_index=True) if not tutto.empty else nuovo[COLONNE].copy()
+    tutto = pd.concat([d for d in (tutto, nuovo[COLONNE]) if not d.empty], ignore_index=True) if not (tutto.empty and nuovo.empty) else nuovo[COLONNE].copy()
     tutto = tutto.sort_values(["comune", "via", "civici", "civico_da"], na_position="first")
     for col in ("civico_da", "civico_a", "n_prese", "n_discordanti"):
         tutto[col] = tutto[col].map(lambda v: "" if pd.isna(v) else str(int(v)))

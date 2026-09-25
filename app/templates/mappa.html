@@ -57,6 +57,7 @@
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/confini_comuni.js"></script>
 <script>
 (function () {
   const GEOJSON = {{ geojson_demo | tojson }};
@@ -135,6 +136,7 @@
     attribution: '&copy; OpenStreetMap',
     maxZoom: 19,
   }).addTo(mappa);
+  L.control.layers(null, { 'Confini comuni (ISTAT)': stratoConfiniComuni(mappa) }, { position: 'topright' }).addTo(mappa);
 
   function stileCorrente(feature) {
     const v = DATI[feature.properties.codice_distretto];
