@@ -22,18 +22,19 @@
 <div class="panel">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
     <h2 style="margin:0">Prese da sistemare, per comune</h2>
-    <a href="/prese/esporta">Scarica le conferme di tutti i comuni (Excel)</a>
+    <span><a href="/prese/esporta">Scarica le conferme di tutti i comuni (Excel)</a> ·
+      <a href="/prese/coordinate">Coordinate da verificare, tutti i comuni (Excel)</a></span>
   </div>
   <div class="table-scroll" style="max-height:none">
     <table>
       <thead><tr><th>Comune</th><th class="num">NO DISTRETTO</th><th class="num">*</th><th class="num">Altro comune</th>
-        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
+        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Via di altro distretto</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th></tr></thead>
       <tbody>
         {% for r in riepilogo %}
         <tr>
           <td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td>
           <td class="num">{{ r.NODMA }}</td><td class="num">{{ r.ND }}</td><td class="num">{{ r.ALTRO }}</td>
-          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
+          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.VIA }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -45,9 +46,11 @@
 <div class="sotto-tab" style="align-items:center;flex-wrap:wrap">
   <a href="/pagine/prese?comune={{ comune | urlencode }}" class="{% if vista == 'assegnare' %}attivo{% endif %}">Da assegnare</a>
   <a href="/pagine/prese?comune={{ comune | urlencode }}&vista=mappa" class="{% if vista == 'mappa' %}attivo{% endif %}">Mappa prese</a>
+  <a href="/pagine/prese?comune={{ comune | urlencode }}&vista=stradario" class="{% if vista == 'stradario' %}attivo{% endif %}">Stradario</a>
   <span style="flex:1"></span>
   <a href="/prese/esporta?comune={{ comune | urlencode }}">Excel conferme (per Neta)</a>
   <a href="/prese/esporta?comune={{ comune | urlencode }}&tutte=1">Excel elenco completo</a>
+  <a href="/prese/coordinate?comune={{ comune | urlencode }}">Excel coordinate da verificare (per Neta)</a>
 </div>
 
 {% if vista == 'assegnare' %}
@@ -66,6 +69,7 @@
         <label><input type="checkbox" class="f-motivo" value="ALTRO" checked> Altro comune</label>
         <label><input type="checkbox" class="f-motivo" value="POSIZIONE" checked> Diverso dalla posizione</label>
         <label><input type="checkbox" class="f-motivo" value="FUSO" checked> Distretto soppresso</label>
+        <label><input type="checkbox" class="f-motivo" value="VIA" checked> Via di altro distretto</label>
         <select id="f-stato">
           <option value="da_fare">Da confermare</option>
           <option value="confermate">Confermate</option>
@@ -89,7 +93,7 @@
   {% for d in distretti_tutti if d not in distretti_comune %}<option value="{{ d }}">{{ comuni_distretti.get(d, '') }}</option>{% endfor %}
 </datalist>
 
-{% else %}
+{% elif vista == 'mappa' %}
 <div class="panel">
   <p class="nota-metodologica" style="margin-bottom:10px">
     {{ punti | length }} prese in mappa{% if n_senza_coord %}, {{ n_senza_coord }} senza coordinate valide (non mostrate){% endif %}.
@@ -101,8 +105,72 @@
     <div id="legenda-distretti" class="legenda-distretti"></div>
   </div>
 </div>
+{% else %}
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+    <h2 style="margin:0">Stradario via → distretto</h2>
+    {% if puo_modificare %}
+    <button type="button" class="btn-primario" id="genera-stradario">{% if stradario %}Rigenera lo stradario{% else %}Genera lo stradario{% endif %}</button>
+    {% endif %}
+  </div>
+  <p class="nota-metodologica" style="margin-bottom:10px">
+    Ricavato una tantum dalla posizione delle prese: il distretto di una via è quello in cui cade la maggior parte
+    delle sue prese. Le vie divise tra due distretti hanno un tratto per distretto (per civico, a volte pari e dispari
+    separati), contando un voto per civico; un palazzo con più prese tutte in un altro distretto diventa
+    un'<em>eccezione</em> della via, da verificare. Le vie senza un taglio netto restano <em>a cavallo</em> e non si controllano. Le prese la cui via è di un
+    altro distretto finiscono nell'elenco con il motivo <strong>Via di altro distretto</strong>.
+    Il file è <span class="mono">project_docs/stradario_distretti.csv</span>, correggibile a mano;
+    rigenerarlo cancella le correzioni fatte per questo comune.
+  </p>
+  {% if stradario %}
+  <div class="table-scroll" style="max-height:none">
+    <table>
+      <thead><tr><th>Via</th><th>Civici</th><th class="num">Dal</th><th class="num">Al</th><th>Distretto</th>
+        <th class="num">Prese</th><th class="num">Fuori posto</th><th>Note</th></tr></thead>
+      <tbody>
+        {% for r in stradario %}
+        <tr>
+          <td>{{ r.via }}</td><td>{{ r.civici }}</td>
+          <td class="num">{{ r.civico_da if r.civico_da is not none else '' }}</td>
+          <td class="num">{{ r.civico_a if r.civico_a is not none else '' }}</td>
+          <td class="mono">{{ r.distretto or '—' }}</td>
+          <td class="num">{{ r.n_prese if r.n_prese is not none else '' }}</td>
+          <td class="num">{{ r.n_discordanti if r.n_discordanti is not none else '' }}</td>
+          <td class="testo-tenue">{{ r.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="testo-tenue">Stradario non ancora generato per {{ comune }}.</p>
+  {% endif %}
+</div>
+{% if puo_modificare %}
+<script>
+document.getElementById('genera-stradario').addEventListener('click', async function () {
+  const esiste = {{ (stradario | length > 0) | tojson }};
+  if (!confirm(esiste ? 'Rigenero lo stradario? Le correzioni fatte a mano per questo comune andranno perse.'
+                      : 'Genero lo stradario dalla posizione delle prese?')) return;
+  this.disabled = true;
+  const risposta = await fetch('/prese/stradario', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comune: {{ comune | tojson }} }),
+  });
+  if (!risposta.ok) {
+    let msg = 'Generazione non riuscita';
+    try { msg = (await risposta.json()).detail || msg; } catch (e) {}
+    alert(msg);
+    this.disabled = false;
+    return;
+  }
+  location.reload();
+});
+</script>
+{% endif %}
 {% endif %}
 
+{% if vista != 'stradario' %}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -115,7 +183,7 @@
   const esc = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = n => Number(n).toLocaleString('it-IT');
 
-  const TEAL_DARK = '#0A5C63', GRIGIO = '#8B9DA6', ROSSO = '#B3261E', AMBRA = '#B9700B', VERDE = '#1C7C4C', VIOLA = '#6A4FB3', BLU = '#2F6FB0';
+  const TEAL_DARK = '#0A5C63', GRIGIO = '#8B9DA6', ROSSO = '#B3261E', AMBRA = '#B9700B', VERDE = '#1C7C4C', VIOLA = '#6A4FB3', BLU = '#2F6FB0', ARANCIO = '#C4501B';
 
   const mappa = L.map('mappa', { preferCanvas: true });
   const baseMappa = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -162,8 +230,8 @@
 {% if vista == 'assegnare' %}
   const RIGHE = {{ righe | tojson }};
   const PUO_MODIFICARE = {{ puo_modificare | tojson }};
-  const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune', POSIZIONE: 'Diverso dalla posizione', FUSO: 'Distretto soppresso' };
-  const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA, POSIZIONE: VIOLA, FUSO: BLU };
+  const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune', POSIZIONE: 'Diverso dalla posizione', FUSO: 'Distretto soppresso', VIA: 'Via di altro distretto' };
+  const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA, POSIZIONE: VIOLA, FUSO: BLU, VIA: ARANCIO };
   const perChiave = new Map(RIGHE.map(r => [r.CHIAVE, r]));
   let selezionata = null;
 
@@ -201,7 +269,7 @@
 
   document.getElementById('legenda').innerHTML = [
     [GRIGIO, 'NO DISTRETTO'], [ROSSO, '* (non indicato)'], [AMBRA, 'Distretto di altro comune'],
-    [VIOLA, 'Distretto diverso dalla posizione'], [BLU, 'Distretto soppresso (fuso)'], [VERDE, 'Confermata'],
+    [VIOLA, 'Distretto diverso dalla posizione'], [BLU, 'Distretto soppresso (fuso)'], [ARANCIO, 'Via di altro distretto'], [VERDE, 'Confermata'],
   ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') +
     '<span><i style="border:2px solid #0A5C63;background:none"></i>Distretti del comune</span>' +
     '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
@@ -215,11 +283,19 @@
       card('Di altro comune', conta('ALTRO'), conta('ALTRO') ? 'warn' : '') +
       card('Diverso dalla posizione', conta('POSIZIONE')) +
       card('Distretto soppresso', conta('FUSO')) +
+      card('Via di altro distretto', conta('VIA')) +
       card('Confermate', RIGHE.filter(r => r.CONFERMATO).length) +
       card('Senza coordinate valide', RIGHE.filter(r => !r.COORD_VALIDE).length);
   }
 
   function testoProposta(r) {
+    if (r.MOTIVO === 'VIA') return `Proposta <strong class="mono">${esc(r.DISTRETTO_VIA)}</strong> <span class="testo-tenue">dalla via (stradario)</span>`;
+    const via = r.DISTRETTO_VIA && r.DISTRETTO_VIA !== r.PROPOSTA
+      ? ` <span class="testo-tenue">· via: <strong class="mono">${esc(r.DISTRETTO_VIA)}</strong></span>` : '';
+    return testoPosizione(r) + via;
+  }
+
+  function testoPosizione(r) {
     if (!r.COORD_VALIDE) return '<span class="badge nodata">coordinate non valide</span>';
     if (!r.PROPOSTA) return `<span class="testo-tenue">nessun distretto entro {{ distanza_max }} m</span>`;
     const dove = r.DISTANZA_M == null ? 'dentro il confine' : `fuori, a ${r.DISTANZA_M} m`;
@@ -239,7 +315,7 @@
       : '';
     const modulo = PUO_MODIFICARE && (!r.CONFERMATO || automatica)
       ? `<div class="modulo-assegna">
-           <input class="campo-distretto mono" list="lista-distretti" value="${esc(r.PROPOSTA || '')}" placeholder="Distretto" size="9">
+           <input class="campo-distretto mono" list="lista-distretti" value="${esc((r.MOTIVO === 'VIA' ? r.DISTRETTO_VIA : r.PROPOSTA) || '')}" placeholder="Distretto" size="9">
            <button type="button" class="btn-primario azione-conferma">Conferma</button>
          </div>` : '';
     return `<div class="riga-presa${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
@@ -275,7 +351,7 @@
     document.getElementById('conteggio').textContent = `${fmt(righe.length)} prese nell'elenco`;
     const bottone = document.getElementById('conferma-proposte');
     if (bottone) {
-      const n = righe.filter(r => !r.CONFERMATO && r.PROPOSTA && r.DISTANZA_M == null).length;
+      const n = righe.filter(r => !r.CONFERMATO && r.MOTIVO !== 'VIA' && r.PROPOSTA && r.DISTANZA_M == null).length;
       bottone.textContent = `Conferma le proposte "dentro il confine" (${fmt(n)})`;
       bottone.disabled = n === 0;
     }
@@ -341,7 +417,7 @@
   });
   const bottone = document.getElementById('conferma-proposte');
   if (bottone) bottone.addEventListener('click', function () {
-    const voci = visibili().filter(r => !r.CONFERMATO && r.PROPOSTA && r.DISTANZA_M == null)
+    const voci = visibili().filter(r => !r.CONFERMATO && r.MOTIVO !== 'VIA' && r.PROPOSTA && r.DISTANZA_M == null)
       .map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
     if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese che cadono dentro un confine?`)) invia(voci);
   });
@@ -413,5 +489,6 @@
 {% endif %}
 })();
 </script>
+{% endif %}
 {% endif %}
 {% endblock %}

@@ -39,7 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app import database, motore_calcolo
+from app import database, motore_calcolo, stradario
 
 # DP segnaposto di Neta, non una presa vera: non raggruppa nulla, ogni
 # servizio resta una riga a se'. L'estrazione di Belgioioso di mag-giu 2026
@@ -63,6 +63,13 @@ DISTANZA_MAX_PROPOSTA_M = 300
 # l'errore della coordinata (Daniele, 25/09/2026).
 TOLLERANZA_BORDO_M = 30
 
+# Coordinate da verificare (file separato per Neta): una presa a piu' di
+# tanto dal distretto piu' vicino del suo comune e' "fuori comune".
+DISTANZA_FUORI_COMUNE_M = 1000
+# Le case sparse (NO DISTRETTO) stanno spesso in campagna a 1-2 km dai
+# distretti (mediana 1,6 km a settembre 2026): per loro solo oltre 5 km.
+DISTANZA_FUORI_COMUNE_NODMA_M = 5000
+
 # Distretti soppressi, fusi in un altro (elenco in motore_calcolo, che nel
 # calcolo li unisce gia' al distretto nuovo): qui le loro prese vanno
 # associate in automatico al distretto nuovo e finiscono nel file per Neta
@@ -75,6 +82,7 @@ MOTIVI = {
     "ALTRO": "Distretto di un altro comune",
     "POSIZIONE": "Distretto diverso dalla posizione",
     "FUSO": "Distretto soppresso (fuso in un altro)",
+    "VIA": "Via di un altro distretto",
 }
 
 COLONNE_ANAGRAFICA = [
@@ -446,7 +454,8 @@ def prese_comune(comune: str) -> pd.DataFrame:
     riga ciascuno), escluse quelle con tutti i servizi cessati e gia'
     fatturati. Colonne: CHIAVE, DP, INDIRIZZO, CAP, SERVIZI (testo), N_SERVIZI,
     DISTRETTO (attuale, piu' codici separati da ' / '), MOTIVO (NODMA / ND /
-    ALTRO / POSIZIONE / FUSO / '' se a posto), LAT, LON, COORD_VALIDE,
+    ALTRO / POSIZIONE / FUSO / VIA / '' se a posto), LAT, LON, COORD_VALIDE,
+    DISTRETTO_VIA (dallo stradario, '' se manca),
     AUTOMATICO (distretto nuovo per le prese di un distretto fuso, o '')."""
     with database.connessione() as conn:
         s = _servizi_comune(conn, comune)
@@ -541,6 +550,28 @@ def prese_comune(comune: str) -> pd.DataFrame:
                     sbagliato[j[profondita > TOLLERANZA_BORDO_M]] = True
         p.loc[p.index[da_controllare[sbagliato]], "MOTIVO"] = "POSIZIONE"
 
+    # Via di un altro distretto (stradario del comune, se generato): il
+    # distretto della via, o del suo tratto di civici, non e' tra quelli
+    # della presa. Anche per prese senza coordinate valide, e trova quelle
+    # con la coordinata sbagliata (Daniele, 25/09/2026).
+    p["DISTRETTO_VIA"] = ""
+    strade = stradario.carica(comune)
+    if not strade.empty:
+        p["DISTRETTO_VIA"] = stradario.distretti_da_via(strade, p["INDIRIZZO"])
+        diversa = np.array([
+            m == "" and dv != "" and dv not in att.split(" / ")
+            for m, dv, att in zip(p["MOTIVO"], p["DISTRETTO_VIA"], p["DISTRETTO"])
+        ])
+        # Presa dentro il distretto della via o a meno di TOLLERANZA_BORDO_M
+        # dal suo confine: e' il confine, non un errore (a Belgioioso Via
+        # Trieste corre lungo il confine DBLG02/DBLG03).
+        coord = p["COORD_VALIDE"].to_numpy()
+        for dv in set(p["DISTRETTO_VIA"][diversa & coord]):
+            j = np.nonzero(diversa & coord & (p["DISTRETTO_VIA"] == dv).to_numpy())[0]
+            dentro, dist = _dentro_e_distanza(p["LAT"].to_numpy(dtype=float)[j], p["LON"].to_numpy(dtype=float)[j], dv)
+            diversa[j[dentro | (dist <= TOLLERANZA_BORDO_M)]] = False
+        p.loc[diversa, "MOTIVO"] = "VIA"
+
     # Distretto fuso: associazione automatica al distretto nuovo, salvo se
     # la presa cade chiaramente (oltre TOLLERANZA_BORDO_M) dentro il confine
     # di un altro distretto: allora resta da confermare a mano.
@@ -602,7 +633,7 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
     for comune in comuni:
         p = prese_da_assegnare(comune, con_proposta=False)
         if p.empty:
-            righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0,
+            righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0, "VIA": 0,
                           "confermate": 0, "recepite": 0})
             continue
         aperte = p[p["MOTIVO"] != ""]
@@ -613,6 +644,7 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
             "ALTRO": int((aperte["MOTIVO"] == "ALTRO").sum()),
             "POSIZIONE": int((aperte["MOTIVO"] == "POSIZIONE").sum()),
             "FUSO": int((aperte["MOTIVO"] == "FUSO").sum()),
+            "VIA": int((aperte["MOTIVO"] == "VIA").sum()),
             "confermate": int(p["CONFERMATO"].notna().sum()),
             "recepite": int(p["RECEPITO"].sum()),
         })
@@ -622,6 +654,115 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Conferme ed esportazione
 # ---------------------------------------------------------------------------
+
+def genera_stradario(comune: str) -> pd.DataFrame:
+    """Genera (una tantum) lo stradario del comune dalla posizione delle
+    sue prese e lo salva, sostituendo quello che c'era per il comune."""
+    p = prese_comune(comune)
+    if p.empty:
+        raise ValueError(f"Nessuna presa per il comune '{comune}'.")
+    # Votano solo le prese chiaramente dentro un distretto: a meno di
+    # TOLLERANZA_BORDO_M dal confine la posizione non e' una prova (a
+    # Belgioioso palazzi sul confine diventavano eccezioni della via).
+    pos = np.array([""] * len(p), dtype=object)
+    validi = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
+    lat = p["LAT"].to_numpy(dtype=float)[validi]
+    lon = p["LON"].to_numpy(dtype=float)[validi]
+    dentro = np.array(_dentro_confini(lat, lon), dtype=object)
+    for codice in set(dentro) - {""}:
+        j = np.nonzero(dentro == codice)[0]
+        _, profondita = _dentro_e_distanza(lat[j], lon[j], codice)
+        pos[validi[j[profondita > TOLLERANZA_BORDO_M]]] = codice
+    pos = list(pos)
+    nuovo = stradario.genera_stradario(p, pos, comune)
+    stradario.salva(comune, nuovo)
+    return nuovo
+
+
+def distretti_del_comune(comune: str) -> set[str]:
+    """Codici dei distretti del comune (ufficiali o associabili)."""
+    comune = comune.strip().upper()
+    elenco = motore_calcolo.carica_mappa_distretti_df()
+    return {
+        r.codice_distretto.upper() for r in elenco.itertuples(index=False)
+        if r.comune_ufficiale.strip().upper() == comune
+        or comune in [c.strip().upper() for c in str(r.comuni_associabili).split(";")]
+    }
+
+
+def coordinate_da_verificare(comune: str) -> pd.DataFrame:
+    """Prese del comune con coordinate da far verificare a Neta (Daniele,
+    25/09/2026), ricalcolate a ogni estrazione indipendentemente dalle
+    conferme del distretto: una presa resta qui finche' Neta non corregge
+    la coordinata. PROBLEMA: mancanti o fuori provincia; dentro un distretto
+    di un altro comune; a piu' di DISTANZA_FUORI_COMUNE_M dai distretti del
+    comune; lontana dal distretto della sua via (stradario), cioe' con ogni
+    probabilita' la coordinata e' di un altro posto."""
+    p = prese_comune(comune)
+    if p.empty:
+        return p
+    problema = pd.Series("", index=p.index)
+    distanza = pd.Series(np.nan, index=p.index)
+    problema[~p["COORD_VALIDE"]] = "Coordinate mancanti o fuori provincia"
+
+    propri = distretti_del_comune(comune) & {c for c, _, _ in _poligoni()}
+    elenco = motore_calcolo.carica_mappa_distretti_df().set_index("codice_distretto")["comune_ufficiale"]
+    v = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
+    if len(v) and propri:
+        lat = p["LAT"].to_numpy(dtype=float)[v]
+        lon = p["LON"].to_numpy(dtype=float)[v]
+        pos = np.array(_dentro_confini(lat, lon), dtype=object)
+        minima = np.full(len(v), np.inf)
+        for codice in propri:
+            dentro, dist = _dentro_e_distanza(lat, lon, codice)
+            minima = np.minimum(minima, np.where(dentro, 0, dist))
+        for k, i in enumerate(v):
+            if pos[k] and pos[k] not in propri:
+                problema.iloc[i] = f"Dentro un distretto di un altro comune ({pos[k]}, {elenco.get(pos[k], '') or '?'})"
+                distanza.iloc[i] = round(minima[k])
+            elif minima[k] > (DISTANZA_FUORI_COMUNE_NODMA_M if p["MOTIVO"].iloc[i] == "NODMA" else DISTANZA_FUORI_COMUNE_M):
+                problema.iloc[i] = "Lontana dai distretti del comune"
+                distanza.iloc[i] = round(minima[k])
+
+        # Coordinata lontana dal distretto della via (oltre la distanza di
+        # proposta): l'indirizzo dice una zona, il punto un'altra.
+        con_via = [k for k, i in enumerate(v) if not problema.iloc[i] and p["DISTRETTO_VIA"].iloc[i]]
+        for dv in {p["DISTRETTO_VIA"].iloc[v[k]] for k in con_via}:
+            ks = np.array([k for k in con_via if p["DISTRETTO_VIA"].iloc[v[k]] == dv])
+            dentro, dist = _dentro_e_distanza(lat[ks], lon[ks], dv)
+            for k, d_in, d in zip(ks, dentro, dist):
+                if not d_in and d > DISTANZA_MAX_PROPOSTA_M:
+                    problema.iloc[v[k]] = f"Lontana dal distretto della sua via ({dv})"
+                    distanza.iloc[v[k]] = round(d)
+    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza)
+    return p[p["PROBLEMA"] != ""].reset_index(drop=True)
+
+
+def esporta_coordinate_excel(comuni: list[str]) -> bytes:
+    """File per Neta con le prese da ricontrollare sul posto / in mappa."""
+    parti = [c.assign(COMUNE=comune) for comune in comuni if not (c := coordinate_da_verificare(comune)).empty]
+    colonne = {
+        "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
+        "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
+        "PROBLEMA": "Problema", "DISTANZA_M": "Distanza (m)", "LAT": "Latitudine", "LON": "Longitudine",
+    }
+    if parti:
+        df = pd.concat(parti, ignore_index=True)
+        df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
+        df = df[list(colonne)].rename(columns=colonne)
+    else:
+        df = pd.DataFrame(columns=list(colonne.values()))
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Coordinate")
+        foglio = writer.sheets["Coordinate"]
+        for i, col in enumerate(df.columns, start=1):
+            larghezza = min(60, max(10, len(col) + 2, *(len(str(v)) + 2 for v in df[col].head(500))))
+            foglio.column_dimensions[foglio.cell(row=1, column=i).column_letter].width = larghezza
+        foglio.freeze_panes = "A2"
+        foglio.auto_filter.ref = foglio.dimensions
+    return buffer.getvalue()
+
 
 def distretti_noti() -> set[str]:
     codici = set(motore_calcolo.carica_mappa_distretti_df()["codice_distretto"].str.upper())
@@ -678,6 +819,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         "DISTRETTO": "Distretto attuale", "MOTIVO_TESTO": "Motivo",
         "CONFERMATO": "Distretto da assegnare", "STATO": "Stato",
         "PROPOSTA": "Distretto proposto (posizione)", "PROPOSTA_COME": "Come",
+        "DISTRETTO_VIA": "Distretto della via (stradario)",
         "CONFERMATO_DA": "Confermato da", "CONFERMATO_IL": "Confermato il",
         "LAT": "Latitudine", "LON": "Longitudine",
     }

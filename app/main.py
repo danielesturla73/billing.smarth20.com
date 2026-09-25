@@ -40,7 +40,7 @@ from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, auth, database, motore_calcolo, prese
+from app import accessi, auth, database, motore_calcolo, prese, stradario
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -1413,8 +1413,9 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
     """Senza comune: conteggi per comune. Con comune: vista "assegnare"
     (mappa + elenco delle prese NODMA / * / di altro comune / con distretto
     che non torna con la posizione, con proposta
-    dalla posizione e conferma) o vista "mappa" (tutte le prese del comune,
-    un puntino del colore del suo distretto)."""
+    dalla posizione e conferma), vista "mappa" (tutte le prese del comune,
+    un puntino del colore del suo distretto) o vista "stradario" (via ->
+    distretto, generato una tantum dalle prese)."""
     comuni_disponibili = _comuni_disponibili()
     contesto = {
         "request": request,
@@ -1422,7 +1423,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         "comuni_disponibili": comuni_disponibili,
         "comune_selezionato": comune,
         "comune": None,
-        "vista": "mappa" if vista == "mappa" else "assegnare",
+        "vista": vista if vista in ("mappa", "stradario") else "assegnare",
         "ricostruzione": dict(prese.STATO_RICOSTRUZIONE),
         "distanza_max": prese.DISTANZA_MAX_PROPOSTA_M,
     }
@@ -1434,6 +1435,17 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
     if not trovato:
         raise HTTPException(status_code=404, detail=f"Nessun archivio trovato per il comune '{comune}'")
     contesto.update(comune=trovato, comune_selezionato=trovato)
+
+    if contesto["vista"] == "stradario":
+        s = stradario.carica(trovato)
+        contesto.update(
+            puo_modificare=request.state.utente["ruolo"] in ("editor", "admin"),
+            stradario=[
+                {k: (None if pd.isna(v) else (int(v) if isinstance(v, float) else v)) for k, v in r.items()}
+                for r in s.to_dict("records")
+            ],
+        )
+        return templates.TemplateResponse(request, "prese.html", contesto)
 
     tutte = prese.prese_comune(trovato)
     validi = tutte[tutte["COORD_VALIDE"]] if not tutte.empty else tutte
@@ -1469,7 +1481,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         contesto["righe"] = _punti_json(da_fare, [
             "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
             "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
-            "CONFERMATO_IL", "RECEPITO",
+            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA",
         ])
     return templates.TemplateResponse(request, "prese.html", contesto)
 
@@ -1497,6 +1509,41 @@ async def prese_assegna(request: Request):
         f"{comune}: {salvate} confermate, {tolte} tolte — {dettaglio}", accessi.ip_client(request),
     )
     return {"salvate": salvate, "tolte": tolte}
+
+
+@app.post("/prese/stradario")
+async def prese_stradario(request: Request):
+    """Genera (o rigenera) lo stradario via -> distretto di un comune dalla
+    posizione delle sue prese: JSON {"comune": ...}. Solo editor/admin."""
+    corpo = await request.json()
+    comune = str(corpo.get("comune", "")).strip().upper()
+    if comune not in [c.strip().upper() for c in _comuni_disponibili()]:
+        raise HTTPException(status_code=400, detail=f"Comune '{comune}' non trovato.")
+    try:
+        nuovo = prese.genera_stradario(comune)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    a_cavallo = int((nuovo["distretto"] == "").sum())
+    auth.registra(
+        request.state.utente["username"], "prese_stradario",
+        f"{comune}: {nuovo['via'].nunique()} vie, {len(nuovo)} righe, {a_cavallo} a cavallo", accessi.ip_client(request),
+    )
+    return {"vie": int(nuovo["via"].nunique()), "righe": len(nuovo), "a_cavallo": a_cavallo}
+
+
+@app.get("/prese/coordinate")
+def prese_coordinate(request: Request, comune: str = ""):
+    """Excel per Neta delle prese con coordinate da verificare (mancanti,
+    fuori comune, lontane dal distretto della via). Senza comune: tutti."""
+    comuni = [comune.strip().upper()] if comune else _comuni_disponibili()
+    contenuto = prese.esporta_coordinate_excel(comuni)
+    nome = f"prese_coordinate_da_verificare_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.xlsx"
+    auth.registra(request.state.utente["username"], "prese_coordinate", comune or "tutti i comuni", accessi.ip_client(request))
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 @app.get("/prese/esporta")
