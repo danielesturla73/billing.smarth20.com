@@ -81,10 +81,22 @@
     <a href="/pagine/prese">Prese</a> segnala le prese da sistemare. Le conferme finiscono nel file per Neta e
     <strong>non cambiano i volumi</strong>.</p>
   <ul>
-    <li><strong>Prima l'indirizzo, poi la posizione.</strong> Se la via della presa è nello stradario, decide la via. Se
-      Neta e via concordano il distretto è giusto, anche quando la coordinata cade altrove: in quel caso è la coordinata
-      da correggere. La posizione (il confine in cui cade il punto) si usa solo per le vie senza distretto.</li>
-    <li><strong>Stradario via → distretto</strong> (sotto-tab Stradario): ricavato una tantum per comune dalle prese.
+    <li><strong>Controlli sempre incrociati, con la fonte.</strong> Per il distretto di una presa ci sono fino a quattro
+      fonti indipendenti, in ordine di affidabilità:
+      <ol>
+        <li><strong>civico ANNCSU</strong>: il distretto in cui cade il civico vero;</li>
+        <li><strong>stradario</strong>: il distretto della via o del tratto di civici;</li>
+        <li><strong>via OSM</strong>: se il tracciato OpenStreetMap della via sta tutto in un distretto;</li>
+        <li><strong>posizione</strong>: dove cade la coordinata di Neta.</li>
+      </ol>
+      La proposta viene dalla prima fonte disponibile (prima l'indirizzo, poi la posizione). Accanto c'è sempre l'elenco
+      delle fonti, con ✓ se concordano e ✗ se no. Se Neta e l'indirizzo concordano il distretto è giusto, anche quando
+      la coordinata cade altrove: in quel caso è la coordinata da correggere.</li>
+    <li><strong>ANNCSU</strong> (Archivio Nazionale dei Numeri Civici delle Strade Urbane, Agenzia delle Entrate e ISTAT,
+      CC-BY 4.0, aggiornato ogni mese) dà la posizione vera dei civici. A settembre 2026 i civici sono posizionati in 12
+      comuni su 22 (Mortara solo il 3%). Negli altri comuni ANNCSU dice solo se l'indirizzo esiste.</li>
+    <li><strong>Stradario via → distretto</strong> (sotto-tab Stradario): ricavato una tantum per comune, dai civici
+      ANNCSU dove sono posizionati, altrimenti dalle prese (la fonte è nella colonna Note).
       Conta un voto per civico, non per presa, così un condominio non pesa più di una casa. Le vie divise tra due distretti
       hanno un tratto per distretto (per civico, a volte pari e dispari separati). Un palazzo con più prese in un altro
       distretto diventa un'eccezione da verificare. Le vie senza un taglio netto restano "a cavallo" e non si controllano.
@@ -98,7 +110,8 @@
       soppresso; via di altro distretto (Neta dice un distretto, lo stradario un altro); diverso dalla posizione (solo
       per le vie senza distretto: la presa cade dentro un altro distretto, oltre 30 m dal confine del suo).</li>
     <li><strong>Proposta</strong>: "via e posizione d'accordo" (la più sicura), "dalla via" oppure "dalla posizione".
-      Il pulsante di conferma in blocco prende solo le proposte sicure.</li>
+      Il pulsante di conferma in blocco prende solo le proposte su cui almeno due fonti sono disponibili e concordano
+      tutte.</li>
     <li><strong>Mantieni attuale</strong>: se la segnalazione è un falso allarme confermi il distretto che la presa ha
       già (anche NO DISTRETTO). La presa è <em>validata</em>: non conta più tra quelle da sistemare e non va nel file per
       Neta. Se un giorno Neta le cambiasse distretto, ricomparirebbe come conferma da recepire.</li>
@@ -117,10 +130,14 @@
     <li><strong>fuori dal comune</strong>, dai confini ufficiali ISTAT (per esempio "cade in Noviglio (MI)"), con 100 m
       di tolleranza;</li>
     <li><strong>coordinata segnaposto</strong>: lo stesso punto usato per prese di 3 o più vie diverse;</li>
-    <li><strong>lontana dalla sua via</strong>: oltre 150 m dal tracciato OpenStreetMap. Se la via non è in OSM si usa il
-      confronto con i civici vicini, e la coordinata proposta è il loro punto centrale;</li>
-    <li><strong>in un altro distretto rispetto alla sua via</strong>.</li>
+    <li><strong>lontana dal suo civico</strong>: oltre 150 m dal civico ANNCSU. Se il civico non è posizionato si
+      guarda il tracciato OpenStreetMap della via (oltre 150 m), altrimenti il confronto con i civici vicini;</li>
+    <li><strong>civico non presente in ANNCSU</strong>: la via c'è ma il civico no (civico sbagliato in Neta, o non ancora
+      registrato dal Comune);</li>
+    <li><strong>in un altro distretto rispetto al suo indirizzo</strong>.</li>
   </ul>
+  <p>La coordinata proposta ha sempre la sua fonte (colonna "Fonte della coordinata proposta"): <em>civico ANNCSU</em>
+    (la posizione vera, quando c'è), <em>stima dai civici vicini</em> o <em>correzione del formato</em>.</p>
   <p><strong>Registra invio</strong> scarica il file con le sole prese ancora aperte e lo segna nel registro: data, chi,
     quali prese. Il registro dice quante prese Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
     dice quante volte una presa era già stata mandata. Gli Excel "solo per guardare" non registrano niente.</p>

@@ -175,7 +175,7 @@
   <div class="table-scroll" style="max-height:none">
     <table>
       <thead><tr><th>Via</th><th>Civici</th><th class="num">Dal</th><th class="num">Al</th><th>Distretto</th>
-        <th class="num">Prese</th><th class="num">Fuori posto</th><th>Note</th><th>Distretti della via in OpenStreetMap</th></tr></thead>
+        <th class="num">Voti (prese o civici)</th><th class="num">Fuori posto</th><th>Note</th><th>Distretti della via in OpenStreetMap</th></tr></thead>
       <tbody>
         {% for r in stradario %}
         <tr>
@@ -308,7 +308,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     m.bindTooltip(() => `<strong class="mono">${esc(r.DP || 'servizio ' + r.SERVIZI)}</strong><br>${esc(r.INDIRIZZO)}<br>` +
         (MOTIVO_TESTO[r.MOTIVO] ? `${esc(MOTIVO_TESTO[r.MOTIVO])}<br>` : '') +
         `Attuale: ${esc(r.DISTRETTO)}` +
-        (r.PROPOSTA ? ` · proposta <strong>${esc(r.PROPOSTA)}</strong> (${esc(FONTE[r.PROPOSTA_DA] || '')})` : '') +
+        (r.PROPOSTA ? ` · proposta <strong>${esc(r.PROPOSTA)}</strong> (${esc(r.PROPOSTA_DA || '')})` : '') +
+        (r.FONTI ? `<br><span style="font-size:11px">${esc(r.FONTI)}</span>` : '') +
         (r.CONFERMATO ? `<br>Confermato: <strong>${esc(r.CONFERMATO)}</strong>` : ''),
       { className: 'tooltip-distretto' });
     m.on('click', () => seleziona(r.CHIAVE, true));
@@ -347,18 +348,17 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   }
 
   // Da dove viene la proposta: prima l'indirizzo (stradario), poi la posizione.
-  const FONTE = { 'via e posizione': "via e posizione d'accordo", 'via': 'dalla via', 'posizione': 'dalla posizione' };
-  // Proposte "sicure" per la conferma in blocco: via e posizione d'accordo,
-  // oppure (via senza distretto) presa dentro un confine.
-  const sicura = r => !r.CONFERMATO && r.PROPOSTA &&
-    (r.PROPOSTA_DA === 'via e posizione' || (r.PROPOSTA_DA === 'posizione' && r.DISTANZA_M == null));
+  // Proposte "sicure" per la conferma in blocco: almeno due fonti e tutte
+  // d'accordo (civico ANNCSU, stradario, via OSM, posizione).
+  const sicura = r => !r.CONFERMATO && r.PROPOSTA && r.CONCORDI;
 
   function testoProposta(r) {
-    if (r.PROPOSTA_DA === 'via' || r.PROPOSTA_DA === 'via e posizione') {
-      const nota = r.PROPOSTA_DA === 'via' && r.COORD_VALIDE ? ' · la posizione dice altro: coordinata da verificare' : '';
-      return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">${FONTE[r.PROPOSTA_DA]}${nota}</span>`;
+    const fonti = r.FONTI ? `<div class="testo-tenue">Fonti: ${esc(r.FONTI)}</div>` : '';
+    if (r.PROPOSTA_DA && r.PROPOSTA_DA !== 'posizione') {
+      return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">dal ${esc(r.PROPOSTA_DA)}` +
+        `${r.CONCORDI ? ' · tutte le fonti concordano' : ''}</span>${fonti}`;
     }
-    return testoPosizione(r);
+    return testoPosizione(r) + fonti;
   }
 
   function testoPosizione(r) {
@@ -495,7 +495,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const bottone = document.getElementById('conferma-proposte');
   if (bottone) bottone.addEventListener('click', function () {
     const voci = visibili().filter(sicura).map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
-    if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese (via e posizione d'accordo, o dentro un confine quando la via non ha distretto)?`)) invia(voci);
+    if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese su cui tutte le fonti concordano?`)) invia(voci);
   });
   document.querySelectorAll('.f-motivo, #f-stato').forEach(el => el.addEventListener('change', disegna));
   document.getElementById('f-testo').addEventListener('input', disegna);

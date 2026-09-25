@@ -107,7 +107,21 @@ def _contenute(pv: frozenset[str], po: frozenset[str]) -> bool:
     return all(any(_simili(a, b) for b in po) for a in pv)
 
 
+_CACHE_ABBINA: dict = {}
+
+
 def abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
+    """Come _abbina, in memoria per le stesse liste (serve piu' volte per
+    comune: ANNCSU, OSM, stradario)."""
+    chiave = (tuple(vie_neta), tuple(nomi_osm))
+    if chiave not in _CACHE_ABBINA:
+        if len(_CACHE_ABBINA) > 200:
+            _CACHE_ABBINA.clear()
+        _CACHE_ABBINA[chiave] = _abbina(vie_neta, nomi_osm)
+    return dict(_CACHE_ABBINA[chiave])
+
+
+def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     """{via Neta: nome OSM} per le vie abbinabili senza ambiguita'. Le parole
     del nome Neta devono stare tutte in quello OSM (VIA CRIMINALI ->
     Via Gerolamo Criminali); tra piu' candidati vince quello con meno parole

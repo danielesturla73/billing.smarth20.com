@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app import database, motore_calcolo, stradario, vie_osm
+from app import anncsu, database, motore_calcolo, stradario, vie_osm
 
 # DP segnaposto di Neta, non una presa vera: non raggruppa nulla, ogni
 # servizio resta una riga a se'. L'estrazione di Belgioioso di mag-giu 2026
@@ -91,6 +91,9 @@ MIN_VIE_COORDINATA_CONDIVISA = 3
 # possono stare arretrate dalla strada): a Belgioioso mediana 14 m, 90% entro
 # 69 m, oltre 150 m 141 prese, tutte coordinate sbagliate a campione.
 DISTANZA_MAX_DA_VIA_OSM_M = 150
+# Distanza massima di una presa dal suo civico ANNCSU (la presa puo' stare in
+# cortile o sul retro): la fonte piu' precisa, prima di OSM e dei vicini.
+DISTANZA_MAX_DA_CIVICO_M = 150
 
 # Distretti soppressi, fusi in un altro (elenco in motore_calcolo, che nel
 # calcolo li unisce gia' al distretto nuovo): qui le loro prese vanno
@@ -633,10 +636,32 @@ def prese_comune(comune: str) -> pd.DataFrame:
     # Belgioioso: Neta e via dicono DBLG02, la coordinata sbagliata cade in
     # DBLG03 e veniva proposto DBLG03): se la via ha un distretto decide la
     # via, il controllo sulla posizione vale solo per le prese senza.
-    p["DISTRETTO_VIA"] = ""
+    # Fonti indipendenti del distretto dall'indirizzo, incrociate e sempre
+    # dichiarate (Daniele, 25/09/2026), dalla piu' affidabile:
+    # - civico ANNCSU: il distretto in cui cade il civico vero (non si usa se
+    #   il civico e' a meno di TOLLERANZA_BORDO_M da un confine);
+    # - stradario: il distretto della via o del suo tratto di civici;
+    # - via OSM: il tracciato OpenStreetMap della via sta (quasi) tutto in un
+    #   distretto.
+    # DISTRETTO_VIA = il distretto dalla prima fonte disponibile, FONTE_INDIRIZZO
+    # quale fonte. D_POSIZIONE = dove cade la coordinata di Neta.
     strade = stradario.carica(comune)
-    if not strade.empty:
-        p["DISTRETTO_VIA"] = stradario.distretti_da_via(strade, p["INDIRIZZO"])
+    p["D_STRADARIO"] = stradario.distretti_da_via(strade, p["INDIRIZZO"]) if not strade.empty else ""
+    civ = anncsu.civici_per_indirizzo(comune, p["INDIRIZZO"])
+    p["CIV_LAT"] = civ["CIV_LAT"].to_numpy()
+    p["CIV_LON"] = civ["CIV_LON"].to_numpy()
+    p["CIVICO_ESISTE"] = civ["CIVICO_ESISTE"].to_numpy()
+    p["D_CIVICO"] = _distretti_sicuri(p["CIV_LAT"].to_numpy(dtype=float), p["CIV_LON"].to_numpy(dtype=float))
+    osm_via = _distretto_osm_unico(comune, [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]])
+    p["D_OSM"] = [osm_via.get(stradario.normalizza_indirizzo(i)[0], "") for i in p["INDIRIZZO"]]
+    p["D_POSIZIONE"] = [""] * len(p)
+    v = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
+    if len(v):
+        for i, d in zip(v, _dentro_confini(p["LAT"].to_numpy(dtype=float)[v], p["LON"].to_numpy(dtype=float)[v])):
+            p.iat[i, p.columns.get_loc("D_POSIZIONE")] = d
+    fonti = [("civico ANNCSU", "D_CIVICO"), ("stradario", "D_STRADARIO"), ("via OSM", "D_OSM")]
+    p["DISTRETTO_VIA"] = [next((r[c] for _, c in fonti if r[c]), "") for r in p[[c for _, c in fonti]].to_dict("records")]
+    p["FONTE_INDIRIZZO"] = [next((n for n, c in fonti if r[c]), "") for r in p[[c for _, c in fonti]].to_dict("records")]
 
     # Distretto valido ma posizione che non torna (Daniele, 25/09/2026), per
     # ogni distretto della presa (piu' codici se i servizi non concordano):
@@ -724,6 +749,39 @@ def prese_comune(comune: str) -> pd.DataFrame:
     return p
 
 
+def _distretti_sicuri(lat: np.ndarray, lon: np.ndarray) -> list[str]:
+    """Distretto in cui cade ogni punto, '' se fuori, NaN o a meno di
+    TOLLERANZA_BORDO_M dal confine (li' il punto non decide)."""
+    esito = [""] * len(lat)
+    ok = np.nonzero(~(np.isnan(lat) | np.isnan(lon)))[0]
+    if not len(ok):
+        return esito
+    dentro = np.array(_dentro_confini(lat[ok], lon[ok]), dtype=object)
+    for codice in set(dentro) - {""}:
+        j = np.nonzero(dentro == codice)[0]
+        _, prof = _dentro_e_distanza(lat[ok][j], lon[ok][j], codice)
+        for jj in j[prof > TOLLERANZA_BORDO_M]:
+            esito[ok[jj]] = codice
+    return esito
+
+
+_CACHE_OSM_UNICO: dict = {}
+
+
+def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
+    """{via Neta: distretto} per le vie il cui tracciato OSM sta per almeno
+    il 95% in un solo distretto (in memoria finche' i file non cambiano)."""
+    chiave = (comune, tuple(sorted(set(vie_neta) - {""})),
+              *(p.stat().st_mtime_ns if p.exists() else 0 for p in (vie_osm.PERCORSO_VIE_OSM, motore_calcolo.PERCORSO_CONFINI_DISTRETTI)))
+    if chiave not in _CACHE_OSM_UNICO:
+        esito = {}
+        for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items():
+            if quote and quote[0][0] != "fuori" and quote[0][1] >= 0.95:
+                esito[via] = quote[0][0]
+        _CACHE_OSM_UNICO[chiave] = esito
+    return _CACHE_OSM_UNICO[chiave]
+
+
 def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     """Le prese con un motivo (NODMA/ND/ALTRO/POSIZIONE/FUSO) piu' quelle gia' confermate
     in passato (anche se nel frattempo Neta le ha corrette: cosi' si vede
@@ -746,18 +804,27 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     lat = p["LAT"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     lon = p["LON"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     proposte = proponi_distretti(lat, lon) if con_proposta else [("", None)] * len(p)
-    # Prima l'indirizzo (stradario), poi la posizione (Daniele, 25/09/2026).
-    # PROPOSTA_DA: 'via e posizione' (d'accordo), 'via', 'posizione'.
+    # Prima l'indirizzo (civico ANNCSU, stradario, via OSM), poi la posizione
+    # (Daniele, 25/09/2026). PROPOSTA_DA = la fonte della proposta; FONTI =
+    # tutte le fonti disponibili con il loro distretto, ✓ se concordano con
+    # la proposta; CONCORDI = almeno due fonti e tutte d'accordo (le sole
+    # proposte confermabili in blocco).
     p["PROPOSTA"] = [dv or c for dv, (c, _) in zip(p["DISTRETTO_VIA"], proposte)]
     p["DISTANZA_M"] = [None if dv else d for dv, (_, d) in zip(p["DISTRETTO_VIA"], proposte)]
-    p["PROPOSTA_DA"] = [
-        ("via e posizione" if dv == c else "via") if dv else ("posizione" if c else "")
-        for dv, (c, _) in zip(p["DISTRETTO_VIA"], proposte)
-    ]
+    p["PROPOSTA_DA"] = [f or ("posizione" if c else "") for f, (c, _) in zip(p["FONTE_INDIRIZZO"], proposte)]
+    fonti, concordi = [], []
+    for r, (c, d) in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM"]].to_dict("records"), proposte):
+        elenco = [("civico ANNCSU", r["D_CIVICO"]), ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
+                  ("posizione", c if d is None else "")]
+        elenco = [(n, x) for n, x in elenco if x]
+        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] else '✗'}" for n, x in elenco))
+        concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
+    p["FONTI"] = fonti
+    p["CONCORDI"] = concordi
     # Recepito: Neta ha gia' messo sulla presa il distretto confermato.
     p["RECEPITO"] = p["CONFERMATO"].notna() & (p["DISTRETTO"] == p["CONFERMATO"])
     # Validata ("mantieni attuale") e ancora con lo stesso distretto in Neta.
-    p["VALIDATA"] = (p["VALIDATA"].fillna(0).astype(int) == 1) & p["RECEPITO"]
+    p["VALIDATA"] = (pd.to_numeric(p["VALIDATA"], errors="coerce").fillna(0).astype(int) == 1) & p["RECEPITO"]
     inviate = invii_per_presa(comune, "distretti")
     p["N_INVII"] = [inviate.get(k, (0, None))[0] for k in p["CHIAVE"]]
     p["ULTIMO_INVIO"] = [inviate.get(k, (0, None))[1] for k in p["CHIAVE"]]
@@ -902,38 +969,48 @@ def distanze_da_via_osm(p: pd.DataFrame, comune: str) -> tuple[dict[str, float],
     return esito, set(abbinate)
 
 
-def coordinate_sbagliate_per_via(p: pd.DataFrame, comune: str) -> dict[str, tuple[str, int | None, float | None, float | None]]:
-    """{chiave: (motivo, distanza, lat proposta, lon proposta)} per le prese
-    con la coordinata lontana dalla sua via. Dove la via e' abbinata a OSM
-    decide OSM (oltre DISTANZA_MAX_DA_VIA_OSM_M); altrimenti il confronto con
-    i civici vicini (fuori_dalla_via). La coordinata proposta e' il punto
-    mediano dei civici vicini, se c'e'."""
+def coordinate_sbagliate_per_via(p: pd.DataFrame, comune: str) -> dict[str, tuple]:
+    """{chiave: (motivo, distanza, lat proposta, lon proposta, fonte della
+    proposta)} per le prese con la coordinata lontana dal suo indirizzo.
+    Fonti in ordine: il civico ANNCSU (oltre DISTANZA_MAX_DA_CIVICO_M; se la
+    presa e' vicina al suo civico e' a posto), il tracciato OSM della via
+    (oltre DISTANZA_MAX_DA_VIA_OSM_M), i civici vicini della stessa via
+    (fuori_dalla_via). Proposta: il civico ANNCSU, altrimenti il punto
+    mediano dei civici vicini."""
     d_osm, abbinate = distanze_da_via_osm(p, comune)
     vicini = fuori_dalla_via(p)
     esito = {}
-    for chiave, indirizzo in zip(p["CHIAVE"], p["INDIRIZZO"]):
+    kx = 111_320 * math.cos(math.radians(45.1))
+    for chiave, indirizzo, ok, la, lo, cla, clo in zip(p["CHIAVE"], p["INDIRIZZO"], p["COORD_VALIDE"], p["LAT"], p["LON"],
+                                                      p.get("CIV_LAT", pd.Series(np.nan, index=p.index)),
+                                                      p.get("CIV_LON", pd.Series(np.nan, index=p.index))):
+        if not ok:
+            continue
         via = stradario.normalizza_indirizzo(indirizzo)[0]
+        if pd.notna(cla):
+            d = math.hypot((la - cla) * 110_540, (lo - clo) * kx)
+            if d > DISTANZA_MAX_DA_CIVICO_M:
+                esito[chiave] = ("Lontana dal suo civico (ANNCSU)", int(round(d)), round(cla, 6), round(clo, 6), "civico ANNCSU")
+            continue
         prop = vicini.get(chiave, (None, None, None))[1:]
+        fonte = "stima dai civici vicini" if prop[0] is not None else ""
         if via in abbinate:
             d = d_osm.get(chiave)
             if d is not None and d > DISTANZA_MAX_DA_VIA_OSM_M:
-                esito[chiave] = ("Lontana dalla sua via (OpenStreetMap)", int(round(d)), *prop)
+                esito[chiave] = ("Lontana dalla sua via (OpenStreetMap)", int(round(d)), *prop, fonte)
         elif chiave in vicini:
-            esito[chiave] = ("Lontana dal resto della via", vicini[chiave][0], *prop)
+            esito[chiave] = ("Lontana dal resto della via", vicini[chiave][0], *prop, fonte)
     return esito
 
 
-def distretti_osm_per_via(comune: str, vie_neta: list[str]) -> dict[str, tuple[str, str]]:
-    """{via Neta: (nome OSM, 'DBLG02 100%' o 'DBLG02 70%, DBLG03 30%')}: i
-    distretti che il tracciato OSM della via attraversa, in proporzione alla
-    lunghezza (punti ogni ~15 m). Indipendente dalle coordinate di Neta:
-    serve a controllare lo stradario."""
+def _quote_osm(comune: str, vie_neta: list[str]) -> dict[str, tuple[str, list[tuple[str, float]]]]:
+    """{via Neta: (nome OSM, [(distretto, quota della lunghezza)])}, in
+    ordine di quota; 'fuori' = fuori da ogni confine."""
     osm = vie_osm.vie_comune(comune)
     if not osm:
         return {}
-    abbinate = vie_osm.abbina(vie_neta, list(osm))
     esito = {}
-    for via, nome in abbinate.items():
+    for via, nome in vie_osm.abbina(vie_neta, list(osm)).items():
         punti = []
         for tr in osm[nome]:
             for (x1, y1), (x2, y2) in zip(tr[:-1], tr[1:]):
@@ -944,9 +1021,19 @@ def distretti_osm_per_via(comune: str, vie_neta: list[str]) -> dict[str, tuple[s
             continue
         arr = np.asarray(punti)
         dove = [d or "fuori" for d in _dentro_confini(arr[:, 0], arr[:, 1])]
-        conta = collections.Counter(dove).most_common()
-        esito[via] = (nome, ", ".join(f"{d} {round(100 * c / len(dove))}%" for d, c in conta if 100 * c / len(dove) >= 3))
+        esito[via] = (nome, [(d, c / len(dove)) for d, c in collections.Counter(dove).most_common()])
     return esito
+
+
+def distretti_osm_per_via(comune: str, vie_neta: list[str]) -> dict[str, tuple[str, str]]:
+    """{via Neta: (nome OSM, 'DBLG02 100%' o 'DBLG02 70%, DBLG03 30%')}: i
+    distretti che il tracciato OSM della via attraversa, in proporzione alla
+    lunghezza (punti ogni ~15 m). Indipendente dalle coordinate di Neta:
+    serve a controllare lo stradario."""
+    return {
+        via: (nome, ", ".join(f"{d} {round(100 * q)}%" for d, q in quote if q >= 0.03))
+        for via, (nome, quote) in _quote_osm(comune, vie_neta).items()
+    }
 
 
 def coordinate_condivise(p: pd.DataFrame) -> dict[str, int]:
@@ -963,8 +1050,10 @@ def coordinate_condivise(p: pd.DataFrame) -> dict[str, int]:
 
 
 def genera_stradario(comune: str) -> pd.DataFrame:
-    """Genera (una tantum) lo stradario del comune dalla posizione delle
-    sue prese e lo salva, sostituendo quello che c'era per il comune."""
+    """Genera (una tantum) lo stradario del comune e lo salva, sostituendo
+    quello che c'era per il comune. Dove ANNCSU ha i civici posizionati
+    votano i civici veri, altrimenti le prese (vedi sotto); la fonte e'
+    nella colonna note."""
     p = prese_comune(comune)
     if p.empty:
         raise ValueError(f"Nessuna presa per il comune '{comune}'.")
@@ -984,8 +1073,27 @@ def genera_stradario(comune: str) -> pd.DataFrame:
     # non votano.
     escluse = set(coordinate_sbagliate_per_via(p, comune)) | set(coordinate_condivise(p))
     pos[[i for i, k in enumerate(p["CHIAVE"]) if k in escluse]] = ""
-    pos = list(pos)
-    nuovo = stradario.genera_stradario(p, pos, comune)
+
+    # Vie con i civici ANNCSU posizionati: votano i civici veri, non le prese
+    # (Daniele, 25/09/2026). Le altre vie restano alle prese.
+    vie_prese = [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]]
+    civici = anncsu.civici_con_coordinate(comune)
+    da_anncsu = set()
+    righe_civici = pd.DataFrame(columns=["INDIRIZZO"])
+    pos_civici: list[str] = []
+    if not civici.empty:
+        abbinate = anncsu.abbinamento_vie(comune, sorted(set(vie_prese) - {""}))
+        per_odonimo = {o: v for v, o in abbinate.items()}
+        c = civici[civici["ODONIMO"].isin(per_odonimo)]
+        if not c.empty:
+            da_anncsu = set(per_odonimo[o] for o in c["ODONIMO"])
+            righe_civici = pd.DataFrame({"INDIRIZZO": [f"{per_odonimo[o]}, {n}" for o, n in zip(c["ODONIMO"], c["CIVICO"])]})
+            pos_civici = _distretti_sicuri(c["LAT"].to_numpy(dtype=float), c["LON"].to_numpy(dtype=float))
+            pos[[i for i, v in enumerate(vie_prese) if v in da_anncsu]] = ""
+    tutte = pd.concat([p[["INDIRIZZO"]], righe_civici], ignore_index=True)
+    nuovo = stradario.genera_stradario(tutte, list(pos) + pos_civici, comune)
+    fonte = ["civici ANNCSU" if v in da_anncsu else "prese Neta" for v in nuovo["via"]]
+    nuovo["note"] = [f"{n}; da {f}" if n else f"da {f}" for n, f in zip(nuovo["note"], fonte)]
     stradario.salva(comune, nuovo)
     return nuovo
 
@@ -1054,11 +1162,13 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
     distanza = pd.Series(np.nan, index=p.index)
     lat_c = pd.Series(np.nan, index=p.index)
     lon_c = pd.Series(np.nan, index=p.index)
+    fonte_c = pd.Series("", index=p.index)
     for i in np.nonzero(~p["COORD_VALIDE"].to_numpy())[0]:
         testo, corretta = _coordinata_non_valida(p["LAT"].iloc[i], p["LON"].iloc[i], comune)
         problema.iloc[i] = testo
         if corretta:
             lat_c.iloc[i], lon_c.iloc[i] = corretta
+            fonte_c.iloc[i] = "correzione del formato"
 
     # Con i confini ISTAT: fuori dal territorio comunale (oltre la
     # tolleranza dei confini generalizzati) al posto della distanza dai
@@ -1085,11 +1195,11 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
         if chiave in condivise:
             problema.iloc[i] = f"Coordinata segnaposto: stesso punto per prese di {condivise[chiave]} vie diverse"
         elif chiave in fuori:
-            motivo, d, la, lo = fuori[chiave]
+            motivo, d, la, lo, fonte = fuori[chiave]
             problema.iloc[i] = motivo
             distanza.iloc[i] = d
             if la is not None:
-                lat_c.iloc[i], lon_c.iloc[i] = la, lo
+                lat_c.iloc[i], lon_c.iloc[i], fonte_c.iloc[i] = la, lo, fonte
 
     # Coordinata in un distretto diverso da quello della sua via, oltre la
     # tolleranza dal confine: con "prima l'indirizzo" il distretto non si
@@ -1107,7 +1217,7 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
             dentro, dist = _dentro_e_distanza(la[k], lo[k], dv)
             for kk, d_in, d in zip(k, dentro, dist):
                 if not d_in and d > TOLLERANZA_BORDO_M:
-                    problema.iloc[j[kk]] = f"Cade in {dove[kk]}, ma la via e' {dv}"
+                    problema.iloc[j[kk]] = f"Cade in {dove[kk]}, ma l'indirizzo e' {dv} ({p['FONTE_INDIRIZZO'].iloc[j[kk]]})"
                     distanza.iloc[j[kk]] = round(d)
 
     propri = distretti_del_comune(comune) & {c for c, _, _ in _poligoni()}
@@ -1131,7 +1241,20 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
                 problema.iloc[i] = "Lontana dai distretti del comune"
                 distanza.iloc[i] = round(minima[k])
 
-    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c)
+    # Indirizzo che ANNCSU non conosce: la via c'e' ma il civico no (civico
+    # sbagliato in Neta, o non ancora registrato dal Comune).
+    for i, esiste in enumerate(p["CIVICO_ESISTE"]):
+        if not problema.iloc[i] and esiste is False:
+            problema.iloc[i] = "Civico non presente in ANNCSU (indirizzo da verificare)"
+
+    # Coordinata proposta: se il civico e' in ANNCSU vince sempre il civico
+    # (Daniele, 25/09/2026: ogni proposta con la sua fonte).
+    civ = p["CIV_LAT"].notna() & (problema != "")
+    lat_c[civ] = p.loc[civ, "CIV_LAT"].round(6)
+    lon_c[civ] = p.loc[civ, "CIV_LON"].round(6)
+    fonte_c[civ] = "civico ANNCSU"
+
+    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c, FONTE_COORDINATA=fonte_c)
     return p[p["PROBLEMA"] != ""].reset_index(drop=True)
 
 
@@ -1143,6 +1266,7 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
         "PROBLEMA": "Problema", "DISTANZA_M": "Distanza (m)", "LAT": "Latitudine", "LON": "Longitudine",
         "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
+        "FONTE_COORDINATA": "Fonte della coordinata proposta",
     }
     if parti:
         df = pd.concat(parti, ignore_index=True)
@@ -1241,12 +1365,14 @@ def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int,
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
     }
     if tipo == "distretti":
-        colonne = {**comuni_col, "VALORE": "Distretto da assegnare", "INVIATA_PRIMA": "Gia' inviata",
+        colonne = {**comuni_col, "VALORE": "Distretto da assegnare", "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti",
+                   "INVIATA_PRIMA": "Gia' inviata",
                    "LAT": "Latitudine", "LON": "Longitudine"}
     else:
         colonne = {**comuni_col, "VALORE": "Problema", "DISTANZA_M": "Distanza (m)", "INVIATA_PRIMA": "Gia' inviata",
                    "LAT": "Latitudine", "LON": "Longitudine",
-                   "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)"}
+                   "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
+                   "FONTE_COORDINATA": "Fonte della coordinata proposta"}
     return id_invio, len(df), _excel(df[list(colonne)].rename(columns=colonne), "Distretti" if tipo == "distretti" else "Coordinate")
 
 
@@ -1366,8 +1492,8 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
         "DISTRETTO": "Distretto attuale", "MOTIVO_TESTO": "Motivo",
         "CONFERMATO": "Distretto da assegnare", "STATO": "Stato",
-        "PROPOSTA": "Distretto proposto", "PROPOSTA_DA": "Proposto da", "PROPOSTA_COME": "Posizione",
-        "DISTRETTO_VIA": "Distretto della via (stradario)",
+        "PROPOSTA": "Distretto proposto", "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti", "PROPOSTA_COME": "Posizione",
+        "DISTRETTO_VIA": "Distretto dall'indirizzo",
         "CONFERMATO_DA": "Confermato da", "CONFERMATO_IL": "Confermato il",
         "LAT": "Latitudine", "LON": "Longitudine",
     }

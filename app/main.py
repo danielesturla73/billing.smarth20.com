@@ -1490,7 +1490,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         contesto["righe"] = _punti_json(da_fare, [
             "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
             "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
-            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA",
+            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA", "FONTI", "CONCORDI",
         ])
     return templates.TemplateResponse(request, "prese.html", contesto)
 

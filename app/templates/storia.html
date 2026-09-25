@@ -143,4 +143,21 @@
     <li>Confini dei comuni ISTAT attivabili in tutte le mappe (menu dei livelli).</li>
   </ul>
 </div>
+
+<div class="panel storia-voce">
+  <div class="data">25/09/2026</div>
+  <h2>Civici ANNCSU e controlli incrociati con la fonte</h2>
+  <ul>
+    <li>Civici ANNCSU (Agenzia delle Entrate e ISTAT, CC-BY 4.0) dei 22 comuni in
+      <code>project_docs/anncsu_civici.csv</code>, aggiornabili ogni mese con <code>scripts/aggiorna_anncsu.py</code>:
+      91.568 civici, l'85% delle prese Neta con via e civico trovati. Posizioni presenti in 12 comuni.</li>
+    <li>Ogni proposta di distretto ha la sua fonte (civico ANNCSU, stradario, via OSM, posizione) e l'elenco di tutte le
+      fonti con ✓/✗. La conferma in blocco vale solo dove tutte le fonti concordano: circa 2.150 prese.</li>
+    <li>Stradario ricostruito dai civici veri dove ANNCSU li ha posizionati: 1.732 righe su 3.051. A Belgioioso Via
+      Molino e Via Trieste risultano tutte DBLG02 anche secondo i civici. Vie a cavallo 23, eccezioni 9.</li>
+    <li>Coordinate da verificare: nuovo controllo "lontana dal suo civico" (oltre 150 m) con la coordinata vera del
+      civico come proposta, e "civico non presente in ANNCSU". Il file sale a circa 11.000 prese; per circa 5.900 c'è
+      la coordinata esatta da proporre a Neta.</li>
+  </ul>
+</div>
 {% endblock %}
