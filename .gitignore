@@ -10,3 +10,4 @@ output/*.xlsx
 input/*.xlsx
 *.egg-info/
 .venv*/
+archivio/cache/
