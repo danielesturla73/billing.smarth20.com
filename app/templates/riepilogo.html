@@ -35,6 +35,25 @@
   </details>
   {% endif %}
 
+  {% if riassegnati %}
+  <details class="avvisi-collassabili">
+    <summary>Volumi spostati dalle conferme del tab Prese ({{ riassegnati|length }}
+      {{ "spostamento" if riassegnati|length == 1 else "spostamenti" }})</summary>
+    <p class="nota-metodologica">Le prese confermate nel <a href="/pagine/prese?comune={{ comune | urlencode }}">tab Prese</a>
+      portano il loro volume nel distretto confermato, per tutta la loro storia. "Da" è il distretto scritto da Neta
+      (NO DISTRETTO, * o un codice di altro comune non erano in nessun distretto: quel volume si recupera).
+      {% if anni_consolidati %}I mesi degli anni consolidati ({{ anni_consolidati | map(attribute='anno') | join(', ') }})
+      restano quelli della copia fissa.{% endif %}</p>
+    <table>
+      <thead><tr><th>Da</th><th>A</th><th class="num">Servizi</th><th class="num">Mesi</th><th class="num">m³ spostati</th></tr></thead>
+      <tbody>{% for r in riassegnati %}
+        <tr><td class="mono">{{ r.Da }}</td><td class="mono">{{ r.A }}</td><td class="num">{{ r.servizi }}</td>
+          <td class="num">{{ r.mesi }}</td><td class="num">{{ "{:.0f}".format(r.volume) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+
   {{ filtro_periodo(comune) }}
   <div class="kpi-grid">
     <div class="kpi">

@@ -122,6 +122,12 @@ class RisultatoElaborazione:
     utenze_corrette_da_nodma: pd.DataFrame        # utenze passate da NODMA/ND a un distretto vero, con il volume rimasto escluso per sempre
     stato_chiusura_mesi: pd.DataFrame             # per mese: lotto di fatturazione girato (Chiuso/Aperto/Non determinabile), vedi calcola_stato_chiusura_mesi
     warning: list[str] = field(default_factory=list)
+    # Volumi spostati dalle riassegnazioni del tab Prese: Mese, Da (distretto
+    # scritto da Neta), A (distretto confermato), Servizi, Volume (m3).
+    volumi_riassegnati: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Import_WMS come ricalcolato oggi, prima di sostituire i mesi degli anni
+    # consolidati con la copia fissa (vedi app/consolidamento.py).
+    volumi_distretto_mese_calcolati: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def carica_estrazione(path: str | Path) -> pd.DataFrame:
@@ -2030,9 +2036,31 @@ def unisci_distretti_fusi(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int
     return df, codici[fusi].value_counts().to_dict()
 
 
-def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
+def applica_riassegnazioni(df: pd.DataFrame, riassegnazioni: dict[str, str]) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Distretto confermato nel tab Prese (chiave: codice servizio come
+    testo) su TUTTE le letture del servizio, anche le passate: la presa non
+    si sposta, era sbagliato il distretto scritto da Neta (Daniele,
+    26/09/2026). Restituisce il DataFrame e {servizio: distretto Neta
+    dell'ultima lettura} dei servizi cambiati, per il prospetto dei volumi
+    spostati. Le letture in archivio non cambiano: solo il calcolo."""
+    if not riassegnazioni or df.empty:
+        return df, {}
+    codici = df["CODICE_SERVIZIO"].astype(str).str.replace(r"\.0$", "", regex=True)
+    nuovo = codici.map(riassegnazioni)
+    cambia = nuovo.notna() & (nuovo != df["DISTRETTO"].astype(str).str.strip().str.upper())
+    if not cambia.any():
+        return df, {}
+    ultime = df[cambia].assign(_C=codici[cambia]).sort_values("DATA_LETTURA").groupby("_C")["DISTRETTO"].last()
+    df = df.copy()
+    df.loc[cambia, "DISTRETTO"] = nuovo[cambia]
+    return df, {c: str(d).strip() for c, d in ultime.items()}
+
+
+def elabora_dataframe(df_grezzo: pd.DataFrame, riassegnazioni: dict[str, str] | None = None) -> RisultatoElaborazione:
     """Come elabora_file, ma parte da un DataFrame già caricato (es.
     l'archivio storico) invece che da percorsi di file su disco.
+    riassegnazioni: {codice servizio: distretto} dalle conferme del tab
+    Prese, applicate a tutta la storia (vedi applica_riassegnazioni).
     """
     warning: list[str] = []
     riepilogo_righe = []
@@ -2045,6 +2073,13 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
             "Distretti soppressi uniti al distretto nuovo: "
             + ", ".join(f"{vecchio} -> {DISTRETTI_FUSI[vecchio]} ({n} righe)" for vecchio, n in sorted(spostate.items()))
             + ". Neta non ha ancora aggiornato il CRM: vedi il tab Prese per il file da mandare."
+        )
+
+    df_grezzo, originali = applica_riassegnazioni(df_grezzo, riassegnazioni or {})
+    if originali:
+        warning.append(
+            f"{len(originali)} servizi con il distretto corretto dalle conferme del tab Prese, anche per i mesi "
+            "passati: vedi il prospetto dei volumi spostati. Le letture in archivio restano come le ha scritte Neta."
         )
 
     for nome_file, df in df_grezzo.groupby("FILE_ORIGINE", sort=False):
@@ -2259,6 +2294,25 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
         df_prorata_b, mese_min_statistiche, mese_max_statistiche_valore
     )
     volumi_utenza_mese = aggrega_utenza_mese(df_prorata_b, mese_min_statistiche, mese_max_statistiche_valore)
+    # Prospetto dei volumi spostati dalle riassegnazioni: dagli stessi periodi
+    # ripartiti del Metodo B e negli stessi mesi di Import_WMS, cosi' torna
+    # con la differenza di Import_WMS (con i soli mesi "statistici" mancava
+    # una parte).
+    volumi_riassegnati = pd.DataFrame(columns=["Mese", "Da", "A", "Servizi", "Volume (m3)"])
+    if originali and not df_prorata_b.empty:
+        codici = df_prorata_b["CODICE_SERVIZIO"].astype(str).str.replace(r"\.0$", "", regex=True)
+        v = df_prorata_b[codici.isin(originali) & (df_prorata_b["CATEGORIA_DISTRETTO"] == "valido")].copy()
+        mesi_import = set(volumi_distretto_mese_b["Mese"].astype(str)) if not volumi_distretto_mese_b.empty else set()
+        v = v[v["MESE"].astype(str).isin(mesi_import)]
+        if not v.empty:
+            v["Da"] = codici[v.index].map(originali)
+            volumi_riassegnati = (
+                v.groupby([v["MESE"].astype(str), "Da", "DISTRETTO"])
+                .agg(Servizi=("CODICE_SERVIZIO", "nunique"), Volume=("VOLUME_MESE_M3", "sum"))
+                .reset_index()
+                .rename(columns={"MESE": "Mese", "DISTRETTO": "A", "Volume": "Volume (m3)"})
+            )
+            volumi_riassegnati["Volume (m3)"] = volumi_riassegnati["Volume (m3)"].round(2)
 
     # Utenze passate da NODMA/ND a un distretto vero nella storia
     # dell'archivio: vedi trova_utenze_corrette_da_nodma per il perche' e'
@@ -2313,6 +2367,7 @@ def elabora_dataframe(df_grezzo: pd.DataFrame) -> RisultatoElaborazione:
         riepilogo_file=pd.DataFrame(riepilogo_righe),
         volumi_distretto_mese_origine=volumi_distretto_mese_origine,
         volumi_utenza_mese=volumi_utenza_mese,
+        volumi_riassegnati=volumi_riassegnati,
         utenze_corrette_da_nodma=utenze_corrette_da_nodma,
         stato_chiusura_mesi=calcola_stato_chiusura_mesi(df_tutti),
         warning=warning,
@@ -2340,6 +2395,9 @@ def esporta_excel(risultato: RisultatoElaborazione, output_path: str | Path) -> 
         df_import = risultato.volumi_distretto_mese.copy()
         df_import["Mese"] = df_import["Mese"].astype(str)
         df_import.to_excel(writer, sheet_name="Import_WMS", index=False)
+
+        if not risultato.volumi_riassegnati.empty:
+            risultato.volumi_riassegnati.to_excel(writer, sheet_name="Volumi_Riassegnati", index=False)
 
         risultato.volumi_distretto_trimestre.to_excel(writer, sheet_name="Riepilogo_Trimestrale", index=False)
 

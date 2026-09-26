@@ -163,12 +163,29 @@
     {{ punti | length }} prese in mappa{% if n_senza_coord %}, {{ n_senza_coord }} senza coordinate valide (non mostrate){% endif %}.
     Ogni puntino ha il colore del distretto della presa; i contorni sono i confini dei distretti.
     Clic su un distretto della legenda per mostrare solo quello.
+    {% if puo_modificare %}Clic su una presa per spostarla in un altro distretto; <strong>Seleziona zona</strong> per spostarne
+    tante insieme disegnando un'area sulla mappa.{% endif %}
   </p>
+  {% if puo_modificare %}
+  <div class="barra-zona">
+    <button type="button" class="btn-primario" id="zona-inizia">Seleziona zona</button>
+    <span id="zona-istruzioni" class="testo-tenue" hidden>Clicca sulla mappa per mettere i vertici dell'area, poi
+      <button type="button" class="btn-link" id="zona-chiudi">chiudi la zona</button> ·
+      <button type="button" class="btn-link pericolo" id="zona-annulla">annulla</button></span>
+  </div>
+  {% endif %}
   <div class="mappa-layout prese-layout">
     <div><div id="mappa" class="mappa-prese"></div></div>
-    <div id="legenda-distretti" class="legenda-distretti"></div>
+    <div>
+      <div id="pannello-zona" class="panel pannello-zona" hidden></div>
+      <div id="legenda-distretti" class="legenda-distretti"></div>
+    </div>
   </div>
 </div>
+<datalist id="lista-distretti-mappa">
+  {% for d in distretti_comune %}<option value="{{ d }}">{{ nomi_distretti.get(d, '') }}</option>{% endfor %}
+  {% for d in distretti_tutti if d not in distretti_comune %}<option value="{{ d }}">{{ comuni_distretti.get(d, '') }}</option>{% endfor %}
+</datalist>
 {% else %}
 <div class="panel">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
@@ -300,6 +317,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
 {% if vista == 'assegnare' %}
   const RIGHE = {{ righe | tojson }};
   const PUO_MODIFICARE = {{ puo_modificare | tojson }};
+  const ORIGINE_TESTO = { proposta: "proposta dell'app", manuale: 'spostata a mano', zona: 'spostata con una zona', mantieni: 'mantieni attuale' };
   const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune', POSIZIONE: 'Diverso dalla posizione', FUSO: 'Distretto soppresso', VIA: 'Via di altro distretto' };
   const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA, POSIZIONE: VIOLA, FUSO: BLU, VIA: ARANCIO };
   const perChiave = new Map(RIGHE.map(r => [r.CHIAVE, r]));
@@ -396,7 +414,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     const automatica = r.CONFERMATO_DA === 'automatico (distretto fuso)';
     const conferma = r.CONFERMATO
       ? `<div class="confermato">✓ <strong class="mono">${esc(r.CONFERMATO)}</strong>
-           <span class="testo-tenue">${esc(r.CONFERMATO_DA || '')} ${esc((r.CONFERMATO_IL || '').slice(0, 10))}</span>
+           <span class="testo-tenue">${esc(r.CONFERMATO_DA || '')} ${esc((r.CONFERMATO_IL || '').slice(0, 10))}${r.ORIGINE ? ' · ' + esc(ORIGINE_TESTO[r.ORIGINE] || r.ORIGINE) : ''}${r.NOTA ? ' · «' + esc(r.NOTA) + '»' : ''}</span>
            ${r.VALIDATA ? '<span class="badge real">validata: distretto attuale corretto</span>'
              : r.RECEPITO ? '<span class="badge real">recepito da Neta</span>'
              : (r.N_INVII ? `<span class="badge stimato">inviata a Neta ${r.N_INVII > 1 ? r.N_INVII + ' volte, ' : ''}il ${esc(String(r.ULTIMO_INVIO).slice(0, 10))}</span>` : '')}
@@ -411,7 +429,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     return `<div class="riga-presa${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
       <div class="riga-testa">
         <span class="mono">${r.DP ? esc(r.DP) : 'senza presa'}</span>
-        <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || 'sistemata')}</span>
+        <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || (r.ORIGINE === 'manuale' || r.ORIGINE === 'zona' ? ORIGINE_TESTO[r.ORIGINE] : 'sistemata'))}</span>
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>
       <div>${esc(r.INDIRIZZO)}</div>
@@ -478,6 +496,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       r.CONFERMATO_IL = v.distretto ? oggi : null;
       r.RECEPITO = !!v.distretto && r.DISTRETTO === v.distretto;
       r.VALIDATA = !!v.validata && r.RECEPITO;
+      r.ORIGINE = v.distretto ? (v.validata ? 'mantieni' : (v.origine || 'proposta')) : '';
     });
     disegna();
     return true;
@@ -490,7 +509,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     if (e.target.classList.contains('azione-conferma')) {
       const valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
       if (!valore) { alert('Scrivi o scegli un distretto.'); return; }
-      invia([{ chiave: chiave, distretto: valore }]);
+      const r = perChiave.get(chiave);
+      invia([{ chiave: chiave, distretto: valore, origine: valore === r.PROPOSTA ? 'proposta' : 'manuale' }]);
     } else if (e.target.classList.contains('azione-mantieni')) {
       const r = perChiave.get(chiave);
       invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
@@ -511,7 +531,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   });
   const bottone = document.getElementById('conferma-proposte');
   if (bottone) bottone.addEventListener('click', function () {
-    const voci = visibili().filter(sicura).map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA }));
+    const voci = visibili().filter(sicura).map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA, origine: 'proposta' }));
     if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} prese su cui tutte le fonti concordano?`)) invia(voci);
   });
   document.querySelectorAll('.f-motivo, #f-stato').forEach(el => el.addEventListener('change', disegna));
@@ -522,7 +542,10 @@ document.getElementById('genera-stradario').addEventListener('click', async func
 
 {% else %}
   const PUNTI = {{ punti | tojson }}.map(a => ({ DP: a[0], INDIRIZZO: a[1], SERVIZI: a[2], N_SERVIZI: a[3],
-    DISTRETTO: a[4], DISTRETTO_PRINCIPALE: a[5], MOTIVO: a[6], LAT: a[7], LON: a[8] }));
+    DISTRETTO: a[4], DISTRETTO_PRINCIPALE: a[5], MOTIVO: a[6], LAT: a[7], LON: a[8], CHIAVE: a[9],
+    CONFERMATO: a[10], ORIGINE: a[11], D_CIVICO: a[12], D_STRADARIO: a[13], D_OSM: a[14] }));
+  const PUO_MODIFICARE = {{ puo_modificare | tojson }};
+  const ORIGINE_TESTO = { proposta: "proposta dell'app", manuale: 'spostata a mano', zona: 'spostata con una zona', mantieni: 'mantieni attuale' };
   // Palette categorica: un colore per distretto, ordine fisso per codice.
   const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948',
                    '#0E7C86', '#8a5a2b', '#6d8f00', '#b0369a', '#3d5a80', '#c08000', '#5aa9e6', '#7a4ea3'];
@@ -544,13 +567,23 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const perDistretto = {};
   PUNTI.forEach(function (p) {
     const c = p.DISTRETTO_PRINCIPALE;
+    // Presa gia' confermata in un altro distretto: bordo spesso del colore di destinazione.
+    const spostata = p.CONFERMATO && p.CONFERMATO !== p.DISTRETTO;
     const m = L.circleMarker([p.LAT, p.LON], {
-      radius: 4, weight: p.MOTIVO === 'ALTRO' ? 2 : 0.6, color: p.MOTIVO === 'ALTRO' ? ROSSO : '#fff',
+      radius: spostata ? 5 : 4, weight: spostata ? 2.5 : (p.MOTIVO === 'ALTRO' ? 2 : 0.6),
+      color: spostata ? coloreDi(p.CONFERMATO) : (p.MOTIVO === 'ALTRO' ? ROSSO : '#fff'),
       fillColor: coloreDi(c), fillOpacity: 0.9,
     });
     m.bindPopup(() => `<strong class="mono">${esc(p.DP || 'servizio senza presa')}</strong><br>${esc(p.INDIRIZZO)}<br>` +
       `Distretto: <strong class="mono">${esc(p.DISTRETTO)}</strong>` + (p.MOTIVO === 'ALTRO' ? ' <em>(di altro comune)</em>' : '') +
-      `<br>${p.N_SERVIZI === 1 ? 'Servizio' : p.N_SERVIZI + ' servizi'}: <span class="mono">${esc(p.SERVIZI)}</span>`);
+      `<br>${p.N_SERVIZI === 1 ? 'Servizio' : p.N_SERVIZI + ' servizi'}: <span class="mono">${esc(p.SERVIZI)}</span>` +
+      (fontiPresa(p) ? `<br><span class="testo-tenue">Fonti: ${esc(fontiPresa(p))}</span>` : '') +
+      (p.CONFERMATO ? `<br>Confermata: <strong class="mono">${esc(p.CONFERMATO)}</strong> <span class="testo-tenue">(${esc(ORIGINE_TESTO[p.ORIGINE] || '')})</span>` : '') +
+      (PUO_MODIFICARE ? `<div class="modulo-assegna" style="margin-top:6px" data-chiave="${esc(p.CHIAVE)}">
+         <input class="campo-distretto mono" list="lista-distretti-mappa" placeholder="Distretto" size="9">
+         <input class="campo-nota" placeholder="Nota (perché)" size="16">
+         <button type="button" class="btn-primario azione-sposta">Sposta</button></div>` : ''));
+    m.on('click', () => { if (disegnando) m.closePopup(); });
     (perDistretto[c] = perDistretto[c] || { marcatori: [], n: 0 }).marcatori.push(m);
     perDistretto[c].n += 1;
   });
@@ -564,7 +597,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
         <td><i style="background:${coloreDi(c)}"></i><span class="mono">${esc(c)}</span>
           <span class="testo-tenue">${esc(NOMI[c] && NOMI[c] !== c ? NOMI[c] : '')}</span></td>
         <td class="num">${fmt(perDistretto[c].n)}</td></tr>`).join('') +
-      '</tbody></table><p class="nota-metodologica" style="margin-top:8px">Bordo rosso = presa con distretto di un altro comune.</p>';
+      '</tbody></table><p class="nota-metodologica" style="margin-top:8px">Bordo rosso = presa con distretto di un altro comune. Bordo spesso colorato = presa già confermata in un altro distretto (il colore è quello di destinazione).</p>';
   }
   document.getElementById('legenda-distretti').addEventListener('click', function (e) {
     const voce = e.target.closest('.voce-legenda');
@@ -579,6 +612,122 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   });
   disegnaLegenda();
   inquadra(PUNTI, distretti);
+
+  // Fonti dell'indirizzo di una presa (civico ANNCSU, stradario, via OSM):
+  // si mostrano prima di spostarla, per decidere sapendo cosa dicono.
+  function fontiPresa(p) {
+    return [['civico ANNCSU', p.D_CIVICO], ['stradario', p.D_STRADARIO], ['via OSM', p.D_OSM]]
+      .filter(([, d]) => d).map(([n, d]) => `${n} ${d}`).join(' · ');
+  }
+
+  async function sposta(voci) {
+    const risposta = await fetch('/prese/assegna', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comune: COMUNE, voci: voci }),
+    });
+    if (!risposta.ok) {
+      let msg = 'Salvataggio non riuscito';
+      try { msg = (await risposta.json()).detail || msg; } catch (e) {}
+      alert(msg);
+      return;
+    }
+    location.reload();
+  }
+
+  // Spostamento di una presa dal popup.
+  document.getElementById('mappa').addEventListener('click', function (e) {
+    if (!e.target.classList.contains('azione-sposta')) return;
+    const modulo = e.target.closest('.modulo-assegna');
+    const distretto = modulo.querySelector('.campo-distretto').value.trim().toUpperCase();
+    if (!distretto) { alert('Scrivi o scegli un distretto.'); return; }
+    const p = PUNTI.find(x => x.CHIAVE === modulo.dataset.chiave);
+    const contrarie = [['civico ANNCSU', p.D_CIVICO], ['stradario', p.D_STRADARIO], ['via OSM', p.D_OSM]].filter(([, d]) => d && d !== distretto);
+    if (contrarie.length && !confirm(`Attenzione: ${contrarie.map(([n, d]) => n + ' dice ' + d).join(', ')}. Sposto lo stesso in ${distretto}?`)) return;
+    sposta([{ chiave: p.CHIAVE, distretto: distretto, origine: 'manuale', nota: modulo.querySelector('.campo-nota').value }]);
+  });
+
+  // Selezione di una zona: vertici con i clic sulla mappa, poi tutte le prese dentro.
+  let disegnando = false, vertici = [], linea = null, poligono = null, selezionate = [];
+  const pannello = document.getElementById('pannello-zona');
+  function dentro(lat, lon, pol) {
+    let d = false;
+    for (let i = 0, j = pol.length - 1; i < pol.length; j = i++) {
+      const [yi, xi] = pol[i], [yj, xj] = pol[j];
+      if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) d = !d;
+    }
+    return d;
+  }
+  function pulisciZona() {
+    disegnando = false; vertici = []; selezionate = [];
+    if (linea) linea.remove(); if (poligono) poligono.remove(); linea = poligono = null;
+    pannello.hidden = true; pannello.innerHTML = '';
+    document.getElementById('zona-istruzioni').hidden = true;
+    document.getElementById('zona-inizia').hidden = false;
+    mappa.getContainer().style.cursor = '';
+  }
+  function avvisiZona(destinazione) {
+    const contro = selezionate.filter(p => [p.D_CIVICO, p.D_STRADARIO, p.D_OSM].some(d => d && d !== destinazione));
+    if (!destinazione || !contro.length) return '';
+    return `<p class="avviso-zona">Attenzione: per ${contro.length} prese almeno una fonte dice un altro distretto:</p><ul class="testo-tenue">` +
+      contro.slice(0, 8).map(p => `<li>${esc(p.INDIRIZZO)}: ${esc(fontiPresa(p))}</li>`).join('') +
+      (contro.length > 8 ? `<li>… e altre ${contro.length - 8}</li>` : '') + '</ul>';
+  }
+  function mostraZona() {
+    const perAttuale = {};
+    selezionate.forEach(p => { perAttuale[p.DISTRETTO] = (perAttuale[p.DISTRETTO] || 0) + 1; });
+    pannello.hidden = false;
+    pannello.innerHTML = `<h3 style="margin-top:0">Zona: ${fmt(selezionate.length)} prese</h3>
+      <p class="testo-tenue">Distretto attuale: ${Object.entries(perAttuale).map(([d, n]) => `<span class="mono">${esc(d)}</span> ${n}`).join(' · ')}</p>
+      <div class="modulo-assegna" style="flex-wrap:wrap;gap:6px">
+        <input id="zona-distretto" class="mono" list="lista-distretti-mappa" placeholder="Distretto di destinazione" size="14">
+        <input id="zona-nota" placeholder="Nota: perché si spostano" size="30">
+        <button type="button" class="btn-primario" id="zona-sposta"${selezionate.length ? '' : ' disabled'}>Sposta le prese</button>
+        <button type="button" class="btn-link pericolo" id="zona-chiudi-pannello">annulla</button>
+      </div>
+      <div id="zona-avvisi"></div>`;
+  }
+  if (PUO_MODIFICARE) {
+    document.getElementById('zona-inizia').addEventListener('click', function () {
+      pulisciZona();
+      disegnando = true;
+      this.hidden = true;
+      document.getElementById('zona-istruzioni').hidden = false;
+      mappa.getContainer().style.cursor = 'crosshair';
+      mappa.closePopup();
+    });
+    mappa.on('click', function (e) {
+      if (!disegnando) return;
+      vertici.push([e.latlng.lat, e.latlng.lng]);
+      if (linea) linea.remove();
+      linea = L.polyline(vertici, { color: '#0F2438', weight: 2, dashArray: '5 4' }).addTo(mappa);
+    });
+    document.getElementById('zona-chiudi').addEventListener('click', function () {
+      if (vertici.length < 3) { alert('Servono almeno 3 vertici.'); return; }
+      disegnando = false;
+      mappa.getContainer().style.cursor = '';
+      if (linea) linea.remove();
+      poligono = L.polygon(vertici, { color: '#0F2438', weight: 2, fillOpacity: 0.08 }).addTo(mappa);
+      selezionate = PUNTI.filter(p => dentro(p.LAT, p.LON, vertici));
+      document.getElementById('zona-istruzioni').hidden = true;
+      mostraZona();
+    });
+    document.getElementById('zona-annulla').addEventListener('click', pulisciZona);
+    pannello.addEventListener('click', function (e) {
+      if (e.target.id === 'zona-chiudi-pannello') pulisciZona();
+      if (e.target.id !== 'zona-sposta') return;
+      const destinazione = document.getElementById('zona-distretto').value.trim().toUpperCase();
+      const nota = document.getElementById('zona-nota').value.trim();
+      if (!destinazione) { alert('Scegli il distretto di destinazione.'); return; }
+      if (!nota) { alert('Scrivi una nota: perché queste prese si spostano (va anche a Neta).'); return; }
+      const voci = selezionate.filter(p => p.DISTRETTO !== destinazione || p.CONFERMATO)
+        .map(p => ({ chiave: p.CHIAVE, distretto: destinazione, origine: 'zona', nota: nota }));
+      if (!voci.length) { alert('Tutte le prese della zona sono già in ' + destinazione + '.'); return; }
+      if (confirm(`Sposto ${voci.length} prese in ${destinazione}?`)) sposta(voci);
+    });
+    pannello.addEventListener('input', function (e) {
+      if (e.target.id === 'zona-distretto') document.getElementById('zona-avvisi').innerHTML = avvisiZona(e.target.value.trim().toUpperCase());
+    });
+  }
 {% endif %}
 })();
 </script>

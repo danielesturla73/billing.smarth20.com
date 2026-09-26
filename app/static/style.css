@@ -495,3 +495,8 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
 .aiuto-prese summary { cursor: pointer; }
 .aiuto-prese ul { margin: 10px 0 6px 18px; }
 .aiuto-prese li { margin-bottom: 4px; }
+
+/* Tab Prese, vista Mappa prese: selezione di una zona */
+.barra-zona { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.pannello-zona { margin-bottom: 10px; }
+.avviso-zona { color: var(--amber, #B9700B); font-weight: 600; margin: 8px 0 4px; }

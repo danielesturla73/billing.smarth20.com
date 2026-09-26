@@ -53,6 +53,8 @@
     <span class="sep" aria-hidden="true"></span>
     <a href="/pagine/distretti{{ q }}"
        class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
+    <a href="/pagine/consolidamento"
+       class="{% if pagina_attiva == 'consolidamento' %}attivo{% endif %}">Consolidamento</a>
     {% if request.state.utente.ruolo != 'viewer' %}
     <a href="/pagine/carica"
        class="{% if pagina_attiva == 'carica' %}attivo{% endif %}">Carica</a>

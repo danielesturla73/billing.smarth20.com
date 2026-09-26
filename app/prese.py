@@ -153,6 +153,14 @@ def assicura_tabelle(conn) -> None:
     colonne = {r[1] for r in conn.execute("PRAGMA table_info(prese_assegnazioni)")}
     if "VALIDATA" not in colonne:
         conn.execute("ALTER TABLE prese_assegnazioni ADD COLUMN VALIDATA INTEGER NOT NULL DEFAULT 0")
+    # ORIGINE: 'proposta' (dell'app), 'manuale' (presa spostata a mano),
+    # 'zona' (spostata con una zona disegnata in mappa), 'mantieni'; NOTA:
+    # il perche', scritto da chi sposta (Daniele, 26/09/2026). Vanno nel file
+    # per Neta.
+    if "ORIGINE" not in colonne:
+        conn.execute("ALTER TABLE prese_assegnazioni ADD COLUMN ORIGINE TEXT NOT NULL DEFAULT ''")
+    if "NOTA" not in colonne:
+        conn.execute("ALTER TABLE prese_assegnazioni ADD COLUMN NOTA TEXT NOT NULL DEFAULT ''")
     # Registro degli invii a Neta (Daniele, 25/09/2026): cosa e' stato
     # mandato, quando e da chi, per vedere cosa Neta ha recepito e cosa
     # sollecitare. TIPO: 'distretti' (conferme) o 'coordinate'.
@@ -805,7 +813,7 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     with database.connessione() as conn:
         a = assegnazioni(conn, comune)
     p = p.merge(
-        a[["DP", "DISTRETTO", "UTENTE", "QUANDO", "VALIDATA"]].rename(columns={
+        a[["DP", "DISTRETTO", "UTENTE", "QUANDO", "VALIDATA", "ORIGINE", "NOTA"]].rename(columns={
             "DP": "CHIAVE", "DISTRETTO": "CONFERMATO", "UTENTE": "CONFERMATO_DA", "QUANDO": "CONFERMATO_IL",
         }),
         on="CHIAVE", how="left",
@@ -813,6 +821,8 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     auto = p["CONFERMATO"].isna() & (p["AUTOMATICO"] != "")
     p.loc[auto, "CONFERMATO"] = p.loc[auto, "AUTOMATICO"]
     p.loc[auto, "CONFERMATO_DA"] = "automatico (distretto fuso)"
+    p["ORIGINE"] = p["ORIGINE"].fillna("")
+    p["NOTA"] = p["NOTA"].fillna("")
     p = p[(p["MOTIVO"] != "") | p["CONFERMATO"].notna()].reset_index(drop=True)
     lat = p["LAT"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
     lon = p["LON"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
@@ -1525,9 +1535,9 @@ def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int,
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
     }
     if tipo == "distretti":
-        colonne = {**comuni_col, "VALORE": "Distretto da assegnare", "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti",
-                   "INVIATA_PRIMA": "Gia' inviata",
-                   "LAT": "Latitudine", "LON": "Longitudine"}
+        df["ORIGINE_TESTO"] = df["ORIGINE"].map(ORIGINI).fillna("")
+        df["MOTIVO_TESTO"] = df["MOTIVO"].map(MOTIVI).fillna("")
+        colonne = {**COLONNE_NETA_DISTRETTI, "INVIATA_PRIMA": "Gia' inviata", "LAT": "Latitudine", "LON": "Longitudine"}
     else:
         colonne = {**comuni_col, "VALORE": "Problema", "DISTANZA_M": "Distanza (m)", "INVIATA_PRIMA": "Gia' inviata",
                    "LAT": "Latitudine", "LON": "Longitudine",
@@ -1625,12 +1635,43 @@ def distretti_noti() -> set[str]:
     return codici | {c.upper() for c, _, _ in _poligoni()}
 
 
-def salva_assegnazioni(comune: str, voci: list[tuple], utente: str) -> tuple[int, int]:
-    """voci = [(chiave presa, distretto)] o [(chiave, distretto, validata)];
+def riassegnazioni_calcolo(comune: str) -> dict[str, str]:
+    """{codice servizio: distretto} per il calcolo dei volumi: le conferme
+    del tab Prese (non le "mantieni attuale", che non cambiano niente)
+    applicate a TUTTI i servizi che sono stati sulla presa, anche cessati,
+    e a tutta la loro storia (Daniele, 26/09/2026: la conferma entra nel
+    calcolo subito, senza aspettare Neta)."""
+    comune = comune.strip().upper()
+    with database.connessione() as conn:
+        a = assegnazioni(conn, comune)
+        a = a[(a["VALIDATA"] == 0) & (a["DISTRETTO"] != "")]
+        if a.empty:
+            return {}
+        s = pd.read_sql("SELECT CODICE_SERVIZIO, DP FROM anagrafica_servizi WHERE LOCALITA = ?", conn, params=(comune,))
+    s["CHIAVE"] = np.where(s["DP"].isin([DP_SEGNAPOSTO, ""]) | s["DP"].isna(), "S" + s["CODICE_SERVIZIO"], s["DP"])
+    distretto = dict(zip(a["DP"], a["DISTRETTO"]))
+    return {c: distretto[k] for c, k in zip(s["CODICE_SERVIZIO"], s["CHIAVE"]) if k in distretto}
+
+
+def conferme_comune(comune: str) -> dict[str, dict]:
+    """{chiave presa: {"DISTRETTO", "ORIGINE", "VALIDATA", "NOTA"}} delle
+    conferme salvate del comune (per la vista Mappa prese)."""
+    with database.connessione() as conn:
+        a = assegnazioni(conn, comune)
+    return {r["DP"]: {"DISTRETTO": r["DISTRETTO"], "ORIGINE": r["ORIGINE"], "VALIDATA": int(r["VALIDATA"]), "NOTA": r["NOTA"]}
+            for r in a.to_dict("records")}
+
+
+ORIGINI = {"proposta": "proposta dell'app", "manuale": "spostata a mano", "zona": "spostata con una zona",
+           "mantieni": "mantieni attuale", "": ""}
+
+
+def salva_assegnazioni(comune: str, voci: list[dict], utente: str) -> tuple[int, int]:
+    """voci = [{"chiave", "distretto", "validata"?, "origine"?, "nota"?}];
     distretto vuoto = togli la conferma. validata = "mantieni attuale": il
     distretto e' quello che la presa ha gia' (anche NO DISTRETTO), accettato
-    anche se non e' nell'elenco distretti. Restituisce (salvate, tolte).
-    Codici sconosciuti rifiutati."""
+    anche se non e' nell'elenco distretti. origine: vedi ORIGINI.
+    Restituisce (salvate, tolte). Codici sconosciuti rifiutati."""
     noti = distretti_noti()
     comune = comune.strip().upper()
     adesso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1638,9 +1679,13 @@ def salva_assegnazioni(comune: str, voci: list[tuple], utente: str) -> tuple[int
     with database.connessione() as conn:
         assicura_tabelle(conn)
         for voce in voci:
-            chiave, distretto = voce[0], voce[1]
-            validata = bool(voce[2]) if len(voce) > 2 else False
-            distretto = (distretto or "").strip().upper()
+            chiave = voce["chiave"]
+            distretto = (voce.get("distretto") or "").strip().upper()
+            validata = bool(voce.get("validata"))
+            origine = "mantieni" if validata else (voce.get("origine") or "proposta")
+            if origine not in ORIGINI:
+                raise ValueError(f"Origine '{origine}' sconosciuta.")
+            nota = (voce.get("nota") or "").strip()[:500]
             if not distretto:
                 tolte += conn.execute(
                     "DELETE FROM prese_assegnazioni WHERE LOCALITA=? AND DP=?", (comune, chiave)
@@ -1649,14 +1694,27 @@ def salva_assegnazioni(comune: str, voci: list[tuple], utente: str) -> tuple[int
             if not validata and distretto not in noti:
                 raise ValueError(f"Distretto '{distretto}' non presente nell'elenco distretti né nei confini.")
             conn.execute(
-                "INSERT INTO prese_assegnazioni (LOCALITA, DP, DISTRETTO, UTENTE, QUANDO, VALIDATA) VALUES (?,?,?,?,?,?) "
-                "ON CONFLICT(LOCALITA, DP) DO UPDATE SET DISTRETTO=excluded.DISTRETTO, "
-                "UTENTE=excluded.UTENTE, QUANDO=excluded.QUANDO, VALIDATA=excluded.VALIDATA",
-                (comune, chiave, distretto, utente, adesso, int(validata)),
+                "INSERT INTO prese_assegnazioni (LOCALITA, DP, DISTRETTO, UTENTE, QUANDO, VALIDATA, ORIGINE, NOTA) "
+                "VALUES (?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(LOCALITA, DP) DO UPDATE SET DISTRETTO=excluded.DISTRETTO, UTENTE=excluded.UTENTE, "
+                "QUANDO=excluded.QUANDO, VALIDATA=excluded.VALIDATA, ORIGINE=excluded.ORIGINE, NOTA=excluded.NOTA",
+                (comune, chiave, distretto, utente, adesso, int(validata), origine, nota),
             )
             salvate += 1
         conn.commit()
     return salvate, tolte
+
+
+# Colonne del file distretti per Neta (Daniele, 26/09/2026): quello che va a
+# Neta e' gia' validato, quindi niente "distretto da assegnare", "stato" ne'
+# "distretto dall'indirizzo"; il distretto confermato si chiama "Distretto
+# corretto" ed e' la terza colonna, quello di Neta "Vecchio distretto".
+COLONNE_NETA_DISTRETTI = {
+    "COMUNE": "Comune", "DP": "Presa (DP)", "CONFERMATO": "Distretto corretto", "DISTRETTO": "Vecchio distretto",
+    "INDIRIZZO": "Indirizzo", "CAP": "CAP", "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
+    "MOTIVO_TESTO": "Motivo", "ORIGINE_TESTO": "Origine", "NOTA": "Nota",
+    "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti",
+}
 
 
 def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
@@ -1679,7 +1737,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
         "DISTRETTO": "Distretto attuale", "MOTIVO_TESTO": "Motivo",
-        "CONFERMATO": "Distretto da assegnare", "STATO": "Stato",
+        "CONFERMATO": "Distretto da assegnare", "ORIGINE_TESTO": "Origine", "NOTA": "Nota", "STATO": "Stato",
         "PROPOSTA": "Distretto proposto", "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti", "PROPOSTA_COME": "Posizione",
         "DISTRETTO_VIA": "Distretto dall'indirizzo",
         "CONFERMATO_DA": "Confermato da", "CONFERMATO_IL": "Confermato il",
@@ -1689,6 +1747,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         df = pd.concat(parti, ignore_index=True)
         df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
         df["MOTIVO_TESTO"] = df["MOTIVO"].map(MOTIVI).fillna("")
+        df["ORIGINE_TESTO"] = df["ORIGINE"].map(ORIGINI).fillna("")
         df["STATO"] = np.where(
             df["VALIDATA"], "Validata: distretto attuale corretto",
             np.where(df["RECEPITO"], "Già recepito da Neta",
@@ -1699,8 +1758,12 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
             for prop, d, da in zip(df["PROPOSTA"], df["DISTANZA_M"], df["PROPOSTA_DA"])
         ]
         df.loc[~df["COORD_VALIDE"], "PROPOSTA_COME"] = "coordinate non valide"
+        if solo_confermate:
+            colonne = {**COLONNE_NETA_DISTRETTI, "LAT": "Latitudine", "LON": "Longitudine"}
         df = df[list(colonne)].rename(columns=colonne)
     else:
+        if solo_confermate:
+            colonne = {**COLONNE_NETA_DISTRETTI, "LAT": "Latitudine", "LON": "Longitudine"}
         df = pd.DataFrame(columns=list(colonne.values()))
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:

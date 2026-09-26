@@ -142,8 +142,34 @@
     <li>Quando hai finito, dalla pagina Prese usa <strong>Registra invio</strong>: scarica il file per Neta e se lo segna,
       per sapere poi cosa Neta ha sistemato e cosa sollecitare.</li>
   </ol>
-  <p>Le conferme <strong>non cambiano i volumi</strong> calcolati: il distretto giusto entra nei calcoli solo quando Neta
-    lo corregge nel suo gestionale e arriva l'estrazione successiva.</p>
+  <h3>Spostare prese a mano o per zona</h3>
+  <p>Nella vista <strong>Mappa prese</strong> puoi spostare anche prese che l'app non segnala:</p>
+  <ul>
+    <li><strong>una presa</strong>: cliccala, scegli il distretto, scrivi una nota (il perché) e premi <em>Sposta</em>;</li>
+    <li><strong>una zona</strong>: premi <em>Seleziona zona</em>, clicca sulla mappa per disegnare l'area (almeno 3 punti), poi
+      <em>chiudi la zona</em>. Compare l'elenco delle prese dentro, con il loro distretto di oggi; scegli il distretto di
+      destinazione, scrivi la nota (obbligatoria) e premi <em>Sposta le prese</em>.</li>
+  </ul>
+  <p>Prima di spostare l'app avvisa se per qualche presa una fonte (civico, stradario, via OSM) dice un distretto diverso:
+    puoi spostarla lo stesso, ma lo fai sapendo cosa dicono le fonti. Gli spostamenti diventano conferme con l'origine
+    ("spostata a mano", "spostata con una zona") e la nota, e vanno nel file per Neta. Sulla mappa una presa confermata in un
+    altro distretto ha il bordo spesso del colore del distretto di destinazione.</p>
+
+  <h3>Le conferme cambiano i volumi, anche nel passato</h3>
+  <p>Una presa confermata porta il suo volume nel distretto confermato <strong>subito</strong>, senza aspettare Neta, e per
+    <strong>tutta la sua storia</strong>: la presa non si è mai spostata, era sbagliato il distretto scritto nel gestionale.
+    Le letture in archivio restano come le ha scritte Neta; cambia solo il calcolo. Le prese che erano NO DISTRETTO, * o
+    con il codice di un altro comune non erano in nessun distretto: confermandole quel volume si <em>recupera</em> nel
+    bilancio. Nella pagina Volumi di ogni comune il riquadro <em>Volumi spostati dalle conferme del tab Prese</em> dice
+    da quale distretto a quale, per quante prese e quanti m³. "Mantieni attuale" non cambia niente.</p>
+  <p>Fanno eccezione gli <strong>anni consolidati</strong> (vedi la pagina <a href="/pagine/consolidamento">Consolidamento</a>):
+    a fine anno si salva una copia fissa del bilancio e da quel momento i mesi di quell'anno non cambiano più.</p>
+
+  <h3>Il file distretti per Neta</h3>
+  <p>Contiene solo le prese confermate e non ancora sistemate da Neta, già validate da chi le ha confermate. Le colonne
+    principali: <strong>Presa (DP)</strong>, <strong>Distretto corretto</strong> (quello da mettere), <strong>Vecchio
+    distretto</strong> (quello di oggi), indirizzo e codici servizio, motivo, origine e nota, e le fonti su cui si basa la
+    proposta.</p>
 
   <h3>Le coordinate proposte a Neta e la loro affidabilità</h3>
   <p>Nel file "coordinate da verificare" l'app propone, quando può, la coordinata giusta. Ogni proposta ha una

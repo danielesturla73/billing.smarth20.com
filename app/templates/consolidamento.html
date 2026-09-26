@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block titolo %}Consolidamento — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Consolidamento annuale</h1>
+<p class="nota-metodologica">
+  A fine anno il bilancio si <strong>consolida</strong>: l'app salva una copia fissa dei volumi fatturati per
+  distretto e mese (Import_WMS) di tutti i comuni. Da quel momento, per i mesi di quell'anno, l'app e l'invio a WMS
+  SmartH2O usano <strong>sempre la copia</strong>, anche se poi arrivano letture nuove o si confermano prese nel tab Prese.
+  <strong>Indietro non si torna</strong>: un anno consolidato non si può rifare né annullare. Il ricalcolo di oggi si vede
+  qui sotto solo per confronto, per capire quanto il consolidato si è discostato.
+</p>
+
+{% if errore %}<div class="panel" style="border-color:var(--danger, #B3261E)">{{ errore }}</div>{% endif %}
+{% if esito %}<div class="panel" style="border-color:var(--green, #1C7C4C)">{{ esito }}</div>{% endif %}
+
+<div class="panel">
+  <h2>Anni consolidati</h2>
+  {% if anni %}
+  <div class="table-scroll" style="max-height:none">
+    <table>
+      <thead><tr><th>Anno</th><th>Consolidato il</th><th>Da</th><th>Nota</th><th class="num">m³ consolidati</th>
+        <th class="num">m³ ricalcolati oggi</th><th class="num">Differenza</th></tr></thead>
+      <tbody>{% for a in anni %}
+        <tr><td>{{ a.anno }}</td><td>{{ a.quando[:16] }}</td><td>{{ a.utente }}</td><td class="testo-tenue">{{ a.nota }}</td>
+          <td class="num">{{ "{:.0f}".format(a.consolidato) }}</td><td class="num">{{ "{:.0f}".format(a.oggi) }}</td>
+          <td class="num">{{ "{:+.0f}".format(a.oggi - a.consolidato) }}</td></tr>
+        {% endfor %}</tbody>
+    </table>
+  </div>
+  {% for a in anni %}
+  <details class="avvisi-collassabili">
+    <summary>{{ a.anno }}: dettaglio per comune</summary>
+    <table>
+      <thead><tr><th>Comune</th><th class="num">m³ consolidati</th><th class="num">m³ ricalcolati oggi</th><th class="num">Differenza</th></tr></thead>
+      <tbody>{% for r in a.comuni %}
+        <tr><td>{{ r.comune }}</td><td class="num">{{ "{:.0f}".format(r.consolidato) }}</td><td class="num">{{ "{:.0f}".format(r.oggi) }}</td>
+          <td class="num">{{ "{:+.0f}".format(r.oggi - r.consolidato) }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="testo-tenue">Nessun anno consolidato.</p>
+  {% endif %}
+</div>
+
+{% if request.state.utente.ruolo == 'admin' %}
+<div class="panel">
+  <h2>Consolida un anno</h2>
+  {% if anni_consolidabili %}
+  <form method="post" action="/admin/consolida"
+        onsubmit="return confirm('Consolido l\'anno ' + this.anno.value + '? Indietro non si torna: i volumi di quell\'anno non cambieranno più.');">
+    <label>Anno <select name="anno">{% for a in anni_consolidabili %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></label>
+    <label>Nota <input name="nota" size="40" placeholder="es. bilancio 2025 approvato"></label>
+    <button type="submit" class="btn-primario">Consolida</button>
+  </form>
+  <p class="nota-metodologica" style="margin-top:8px">Prima di consolidare: carica tutte le estrazioni che coprono l'anno e
+    conferma le prese che vuoi far entrare nel bilancio. Un mese ancora con stime provvisorie resta com'è nella copia.</p>
+  {% else %}
+  <p class="testo-tenue">Nessun anno da consolidare.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

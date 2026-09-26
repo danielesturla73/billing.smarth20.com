@@ -40,7 +40,7 @@ from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, auth, database, motore_calcolo, prese, stradario
+from app import accessi, auth, consolidamento, database, motore_calcolo, prese, stradario
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -421,7 +421,13 @@ def _risultato_in_cache(conn, comune: str):
             if chiave in _CACHE_RISULTATI:  # calcolato da un'altra richiesta nel frattempo
                 return _CACHE_RISULTATI[chiave]
         df = database.carica_letture(conn, comune)
-        risultato = None if df.empty else motore_calcolo.elabora_dataframe(df)
+        # Conferme del tab Prese nel calcolo, su tutta la storia; poi i mesi
+        # degli anni consolidati tornano quelli della copia fissa (Daniele,
+        # 26/09/2026).
+        risultato = None if df.empty else motore_calcolo.elabora_dataframe(df, prese.riassegnazioni_calcolo(comune))
+        if risultato is not None:
+            risultato.volumi_distretto_mese_calcolati = risultato.volumi_distretto_mese
+            risultato.volumi_distretto_mese = consolidamento.applica(risultato.volumi_distretto_mese, comune)
         with _LOCK_CACHE:
             _CACHE_RISULTATI[chiave] = risultato
         return risultato
@@ -549,6 +555,67 @@ def _comuni_disponibili() -> list[str]:
         return database.elenco_comuni(conn)
 
 
+def _riassegnati_per_coppia(v: pd.DataFrame) -> list[dict]:
+    """Volumi spostati dalle conferme del tab Prese, per coppia da -> a
+    (totale su tutti i mesi), dal piu' grande."""
+    if v is None or v.empty:
+        return []
+    g = v.groupby(["Da", "A"], as_index=False).agg(servizi=("Servizi", "max"), volume=("Volume (m3)", "sum"),
+                                                   mesi=("Mese", "nunique"))
+    return g.sort_values("volume", ascending=False).to_dict("records")
+
+
+def _contesto_consolidamento(request: Request, errore: str = "", esito: str = "") -> dict:
+    calcolati = {c: r.volumi_distretto_mese_calcolati for c, r in _risultati_per_comune(None)}
+    fissi = consolidamento.volumi_consolidati()
+    anni = []
+    for a in consolidamento.anni_consolidati():
+        f = fissi[fissi["ANNO"] == a["anno"]]
+        comuni = []
+        for comune in sorted(set(f["COMUNE"]) | set(calcolati)):
+            v = calcolati.get(comune)
+            oggi = float(v[v["Mese"].astype(str).str.startswith(f"{a['anno']}-")]["Volume Fatturato (m3)"].sum()) if v is not None and not v.empty else 0.0
+            comuni.append({"comune": comune, "consolidato": float(f[f["COMUNE"] == comune]["VOLUME"].sum()), "oggi": oggi})
+        anni.append({**a, "comuni": comuni, "consolidato": sum(c["consolidato"] for c in comuni), "oggi": sum(c["oggi"] for c in comuni)})
+    fatti = {a["anno"] for a in anni}
+    presenti = {int(str(m)[:4]) for v in calcolati.values() if v is not None and not v.empty for m in v["Mese"]}
+    return {
+        "request": request, "pagina_attiva": "consolidamento", "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": None, "anni": anni, "anni_consolidabili": sorted(presenti - fatti),
+        "errore": errore, "esito": esito,
+    }
+
+
+@app.get("/pagine/consolidamento")
+def pagina_consolidamento(request: Request):
+    """Anni consolidati (copia fissa di Import_WMS) e, per gli admin, il
+    pulsante per consolidare un anno (Daniele, 26/09/2026)."""
+    return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request))
+
+
+@app.post("/admin/consolida")
+async def admin_consolida(request: Request):
+    """Consolida un anno: copia fissa di Import_WMS di tutti i comuni.
+    Solo admin (middleware su /admin/*). Irreversibile."""
+    form = await request.form()
+    try:
+        anno = int(str(form.get("anno", "")))
+    except ValueError:
+        return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request, errore="Anno non valido."))
+    nota = str(form.get("nota", ""))
+    calcolati = {c: r.volumi_distretto_mese_calcolati for c, r in _risultati_per_comune(None)}
+    try:
+        n = consolidamento.consolida(anno, calcolati, request.state.utente["username"], nota)
+    except ValueError as exc:
+        return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request, errore=str(exc)))
+    auth.registra(request.state.utente["username"], "consolida_anno", f"anno {anno}: {n} righe; nota: {nota}", accessi.ip_client(request))
+    with _LOCK_CACHE:
+        _CACHE_RISULTATI.clear()
+    threading.Thread(target=lambda: list(_risultati_per_comune(None)), daemon=True).start()
+    return templates.TemplateResponse(request, "consolidamento.html",
+                                      _contesto_consolidamento(request, esito=f"Anno {anno} consolidato: {n} righe mese/distretto salvate."))
+
+
 @app.get("/pagine/riepilogo")
 def pagina_riepilogo(request: Request, comune: str | None = None, dal: str = "", al: str = ""):
     """Stessi dati di /riepilogo, mostrati come pagina HTML invece che
@@ -598,6 +665,8 @@ def pagina_riepilogo(request: Request, comune: str | None = None, dal: str = "",
             "trimestri_provvisori": int(trimestri_provvisori),
             "distretti": pivot["distretti"],
             "righe_pivot": pivot["righe"],
+            "riassegnati": _riassegnati_per_coppia(risultato.volumi_riassegnati),
+            "anni_consolidati": consolidamento.anni_consolidati(),
         })
 
     tutti = list(_risultati_per_comune(None))
@@ -1478,9 +1547,12 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
     if contesto["vista"] == "mappa":
         # Array compatti (non dict con i nomi dei campi): Voghera ha ~9.000
         # prese e la pagina pesava 2,7 MB. Ordine: vedi PUNTI in prese.html.
+        conferme = prese.conferme_comune(trovato)
         contesto["punti"] = [
             [r.DP, r.INDIRIZZO, r.SERVIZI, r.N_SERVIZI, r.DISTRETTO, r.DISTRETTO_PRINCIPALE, r.MOTIVO,
-             round(float(r.LAT), 6), round(float(r.LON), 6)]
+             round(float(r.LAT), 6), round(float(r.LON), 6), r.CHIAVE,
+             conferme.get(r.CHIAVE, {}).get("DISTRETTO", ""), conferme.get(r.CHIAVE, {}).get("ORIGINE", ""),
+             r.D_CIVICO, r.D_STRADARIO, r.D_OSM]
             for r in validi.itertuples(index=False)
         ]
         contesto["n_totale"] = len(tutte)
@@ -1490,7 +1562,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         contesto["righe"] = _punti_json(da_fare, [
             "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
             "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
-            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA", "FONTI", "CONCORDI",
+            "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA", "FONTI", "CONCORDI", "ORIGINE", "NOTA",
         ])
     return templates.TemplateResponse(request, "prese.html", contesto)
 
@@ -1502,22 +1574,30 @@ async def prese_assegna(request: Request):
     Solo editor/admin (middleware: ogni POST)."""
     corpo = await request.json()
     comune = str(corpo.get("comune", "")).strip()
-    voci = [(str(v.get("chiave", "")).strip(), str(v.get("distretto", "")), bool(v.get("validata")))
+    voci = [{"chiave": str(v.get("chiave", "")).strip(), "distretto": str(v.get("distretto", "")),
+             "validata": bool(v.get("validata")), "origine": str(v.get("origine", "") or ""), "nota": str(v.get("nota", "") or "")}
             for v in corpo.get("voci", [])]
-    voci = [v for v in voci if v[0]]
+    voci = [v for v in voci if v["chiave"]]
     if not comune or not voci:
         raise HTTPException(status_code=400, detail="Comune o prese mancanti.")
     try:
         salvate, tolte = prese.salva_assegnazioni(comune, voci, request.state.utente["username"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    dettaglio = ", ".join(f"{k}→{d.strip().upper() or '(tolta)'}{' (mantieni attuale)' if val else ''}" for k, d, val in voci[:20])
+    dettaglio = ", ".join(
+        f"{v['chiave']}→{v['distretto'].strip().upper() or '(tolta)'}"
+        f"{' (' + prese.ORIGINI.get('mantieni' if v['validata'] else v['origine'] or 'proposta', '') + ')'}"
+        for v in voci[:20])
+    if voci and voci[0]["nota"]:
+        dettaglio += f" — nota: {voci[0]['nota']}"
     if len(voci) > 20:
         dettaglio += f" … (+{len(voci) - 20})"
     auth.registra(
         request.state.utente["username"], "prese_assegna",
         f"{comune}: {salvate} confermate, {tolte} tolte — {dettaglio}", accessi.ip_client(request),
     )
+    # Le conferme entrano nel calcolo: si ricalcolano i volumi del comune.
+    _invalida_comune(comune)
     return {"salvate": salvate, "tolte": tolte}
 
 
