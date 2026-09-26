@@ -74,6 +74,99 @@
     "Distretto soppresso", già associate al distretto nuovo, e finiscono nel file per Neta.</p>
 </div>
 
+<div class="panel" id="guida-prese">
+  <h2>Guida al tab Prese, per chi inizia</h2>
+  <p>Questa parte spiega il tab <a href="/pagine/prese">Prese</a> a chi non conosce l'argomento. I dettagli tecnici sono
+    nei riquadri successivi.</p>
+
+  <h3>Le parole che servono</h3>
+  <ul>
+    <li><strong>Presa</strong>: il punto fisico in cui l'acquedotto entra in un edificio (in Neta la colonna DP). Non
+      cambia mai.</li>
+    <li><strong>Servizio</strong> (o utenza): il contratto collegato alla presa. Può cambiare nel tempo (nuovo
+      inquilino, nuovo contratto) e una presa può averne più d'uno (un condominio).</li>
+    <li><strong>Distretto</strong>: una zona della rete idrica, con un codice come DBLG02 o DCT05. Per ogni distretto si
+      confronta l'acqua immessa con quella fatturata: è così che si trovano le perdite. Per questo ogni presa deve
+      stare nel distretto giusto.</li>
+    <li><strong>NO DISTRETTO</strong>: prese fuori da ogni distretto, per esempio case isolate in campagna. Non è
+      sempre un errore.</li>
+    <li><strong>Coordinata</strong>: latitudine e longitudine della presa, cioè dove si trova sulla mappa. Quelle di Neta
+      sono spesso sbagliate, e Neta ha assegnato i distretti proprio in base a quelle coordinate.</li>
+    <li><strong>Stradario</strong>: la tabella che dice in quale distretto sta ogni via, o ogni tratto di via.</li>
+  </ul>
+
+  <h3>Le fonti che l'app confronta</h3>
+  <p>Per capire in quale distretto deve stare una presa l'app non si fida di un solo dato: confronta fonti diverse e
+    indipendenti tra loro.</p>
+  <ul>
+    <li><strong>civico ANNCSU</strong>: l'archivio ufficiale dei numeri civici (Agenzia delle Entrate e ISTAT), con la
+      posizione vera di ogni civico registrata dal Comune. È la fonte più affidabile. Non tutti i Comuni hanno
+      posizionato i civici.</li>
+    <li><strong>stradario</strong>: la tabella via → distretto descritta sopra.</li>
+    <li><strong>via OSM</strong>: il tracciato della via su OpenStreetMap, la mappa libera del mondo. Se la via sta tutta
+      dentro un distretto, anche questa fonte dice quale.</li>
+    <li><strong>posizione</strong>: il distretto in cui cade la coordinata di Neta. È la fonte meno affidabile.</li>
+  </ul>
+
+  <h3>Come si legge la riga "Fonti"</h3>
+  <p>Sotto ogni proposta c'è una riga come questa:</p>
+  <p class="mono" style="background:var(--bg-soft, #F3F6F8);padding:8px 10px;border-radius:6px">
+    Fonti: civico ANNCSU DCT05 ✓ · stradario DCT05 ✓ · via OSM DCT05 ✓ · posizione DCT04 ✗</p>
+  <p>Si legge così:</p>
+  <ul>
+    <li><strong>civico ANNCSU DCT05 ✓</strong>: il civico vero di questo indirizzo sta nel distretto DCT05, e questo
+      concorda (✓) con la proposta;</li>
+    <li><strong>stradario DCT05 ✓</strong>: anche la tabella delle vie dice DCT05;</li>
+    <li><strong>via OSM DCT05 ✓</strong>: anche il tracciato della via sulla mappa sta in DCT05;</li>
+    <li><strong>posizione DCT04 ✗</strong>: la coordinata di Neta invece cade in DCT04, e non concorda (✗). Qui il
+      problema è la coordinata, non l'indirizzo.</li>
+  </ul>
+  <p>Più fonti concordano, più la proposta è sicura. Se compare solo una fonte, le altre non erano disponibili per quella
+    presa (civico non posizionato, via non trovata…). Una ✗ non vuol dire che la proposta sia sbagliata: vuol dire che
+    quella fonte dice un'altra cosa, ed è meglio guardare la mappa prima di confermare.</p>
+
+  <h3>Cosa fare, presa per presa</h3>
+  <ol>
+    <li>Clicca la presa nell'elenco: la mappa la mostra, con i confini dei distretti.</li>
+    <li>Leggi il <strong>motivo</strong> (perché è segnalata), la <strong>proposta</strong> e le
+      <strong>fonti</strong>.</li>
+    <li>Scegli:
+      <ul>
+        <li><strong>Conferma</strong>: il distretto proposto (o uno che scegli tu) è quello giusto. Andrà a Neta;</li>
+        <li><strong>Mantieni attuale</strong>: la segnalazione è un falso allarme e il distretto che la presa ha già è
+          giusto. La presa è "validata" e non va a Neta;</li>
+        <li>non fare niente, se non sei sicuro: la presa resta da decidere.</li>
+      </ul></li>
+    <li><strong>Conferma le proposte sicure</strong> conferma in un colpo solo le prese su cui almeno due fonti sono
+      disponibili e concordano tutte.</li>
+    <li>Quando hai finito, dalla pagina Prese usa <strong>Registra invio</strong>: scarica il file per Neta e se lo segna,
+      per sapere poi cosa Neta ha sistemato e cosa sollecitare.</li>
+  </ol>
+  <p>Le conferme <strong>non cambiano i volumi</strong> calcolati: il distretto giusto entra nei calcoli solo quando Neta
+    lo corregge nel suo gestionale e arriva l'estrazione successiva.</p>
+
+  <h3>Le coordinate proposte a Neta e la loro affidabilità</h3>
+  <p>Nel file "coordinate da verificare" l'app propone, quando può, la coordinata giusta. Ogni proposta ha una
+    <strong>fonte</strong> e un'<strong>affidabilità</strong>:</p>
+  <ul>
+    <li><strong>alta</strong>: è la posizione del civico nell'archivio ANNCSU, oppure la stessa coordinata di Neta scritta
+      male e corretta (virgola persa, latitudine e longitudine scambiate). In più ha superato tutti i controlli;</li>
+    <li><strong>media</strong>: civico ANNCSU senza precisione dichiarata, oppure una stima "a metà strada" lungo la via
+      tra due civici vicini con la coordinata buona (per esempio il 24 tra il 22 e il 28), oppure una fonte alta che
+      non ha superato un controllo;</li>
+    <li><strong>bassa</strong>: stima non affidabile. L'app <strong>non propone nessuna coordinata</strong> e scrive "da
+      rilevare sul posto".</li>
+  </ul>
+  <p>I controlli fatti su ogni coordinata proposta, scritti nella colonna "Fonte e controlli della proposta":</p>
+  <ul>
+    <li><strong>comune ✓</strong>: il punto cade nel comune giusto, secondo i confini ufficiali ISTAT;</li>
+    <li><strong>via OSM ✓ (12 m)</strong>: il punto sta a 12 m dal tracciato della sua via (deve stare entro 60 m);</li>
+    <li><strong>distretto ✓</strong>: il punto cade nel distretto indicato dalle altre fonti.</li>
+  </ul>
+  <p>Ogni ✗ abbassa l'affidabilità di un livello. L'Excel ha anche un foglio <strong>Legenda</strong> con queste
+    spiegazioni, per chi lo riceve.</p>
+</div>
+
 <div class="panel">
   <h2>Prese e distretti: come funzionano i controlli</h2>
   <p>Neta associa i distretti alle <strong>prese</strong> (colonna DP). Una presa non cambia mai: cambia solo l'utenza
@@ -136,8 +229,19 @@
       registrato dal Comune);</li>
     <li><strong>in un altro distretto rispetto al suo indirizzo</strong>.</li>
   </ul>
-  <p>La coordinata proposta ha sempre la sua fonte (colonna "Fonte della coordinata proposta"): <em>civico ANNCSU</em>
-    (la posizione vera, quando c'è), <em>stima dai civici vicini</em> o <em>correzione del formato</em>.</p>
+  <p>La coordinata proposta ha sempre la sua fonte e un'affidabilità (vedi la <a href="#guida-prese">guida</a>).</p>
+  <ol>
+    <li><em>Civico ANNCSU</em>: affidabilità alta se il Comune l'ha posizionato con rilievo o cartografia (metodi 1-4),
+      media se l'ha inserito dal Portale per i Comuni (metodo 5).</li>
+    <li><em>Correzione del formato</em>: alta.</li>
+    <li><em>Interpolazione lungo la via</em> (OSM): il civico si colloca sul tracciato della via tra i due civici vicini dallo
+      stesso lato con coordinata buona (entro 30 m dalla via). Media se i due distano al massimo 100 m, bassa se di più;
+      oltre 300 m non si interpola. Serve nei comuni senza civici ANNCSU.</li>
+    <li><em>Stima dai civici vicini</em>: bassa.</li>
+  </ol>
+  <p>Poi ci sono i controlli incrociati: comune giusto (ISTAT), entro 60 m dalla via OSM, distretto uguale a quello
+    dello stradario o della via OSM. Ogni controllo non superato abbassa di un livello. Con affidabilità bassa non si
+    propone niente: "da rilevare sul posto".</p>
   <p><strong>Registra invio</strong> scarica il file con le sole prese ancora aperte e lo segna nel registro: data, chi,
     quali prese. Il registro dice quante prese Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
     dice quante volte una presa era già stata mandata. Gli Excel "solo per guardare" non registrano niente.</p>

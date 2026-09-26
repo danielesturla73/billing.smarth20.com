@@ -101,6 +101,23 @@
 </div>
 
 {% if vista == 'assegnare' %}
+<details class="panel aiuto-prese">
+  <summary><strong>Come si legge questa pagina</strong> <span class="testo-tenue">(clicca per aprire)</span></summary>
+  <ul>
+    <li>Nell'elenco ci sono le prese da sistemare, ognuna col <strong>motivo</strong> della segnalazione e una
+      <strong>proposta</strong> di distretto.</li>
+    <li>La riga <strong>Fonti</strong> dice chi sostiene la proposta. Per esempio
+      <span class="mono">civico ANNCSU DCT05 ✓ · stradario DCT05 ✓ · via OSM DCT05 ✓ · posizione DCT04 ✗</span> vuol dire:
+      il civico ufficiale, la tabella delle vie e la mappa delle strade dicono DCT05 (✓, d'accordo con la proposta),
+      mentre la coordinata di Neta cade in DCT04 (✗). Più ✓ ci sono, più la proposta è sicura.</li>
+    <li><strong>Conferma</strong> = il distretto proposto è giusto, va a Neta. <strong>Mantieni attuale</strong> = falso
+      allarme, il distretto che la presa ha già è giusto. Se non sei sicuro non fare niente.</li>
+    <li><strong>Conferma le proposte sicure</strong> conferma solo le prese su cui almeno due fonti concordano tutte.</li>
+    <li>Le conferme non cambiano i volumi: diventano un file per Neta.</li>
+  </ul>
+  <p><a href="/pagine/info#guida-prese">Guida completa, con tutte le parole spiegate</a></p>
+</details>
+
 <div class="kpi-grid" id="kpi"></div>
 
 <div class="panel">

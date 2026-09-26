@@ -490,3 +490,8 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
   color: #7A3E9D; font-weight: 600; font-size: 12px; text-shadow: 0 0 3px #fff, 0 0 3px #fff;
 }
 .etichetta-comune::before { display: none; }
+
+/* Riquadro di aiuto apribile del tab Prese */
+.aiuto-prese summary { cursor: pointer; }
+.aiuto-prese ul { margin: 10px 0 6px 18px; }
+.aiuto-prese li { margin-bottom: 4px; }

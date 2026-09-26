@@ -49,16 +49,17 @@ def civici_per_indirizzo(comune: str, indirizzi) -> pd.DataFrame:
     d = _dati()
     d = d[d["COMUNE"] == comune.strip().upper()]
     esito = pd.DataFrame({"VIA_ANNCSU": [""] * len(indirizzi), "CIVICO_ESISTE": [None] * len(indirizzi),
-                          "CIV_LAT": [float("nan")] * len(indirizzi), "CIV_LON": [float("nan")] * len(indirizzi)})
+                          "CIV_LAT": [float("nan")] * len(indirizzi), "CIV_LON": [float("nan")] * len(indirizzi),
+                          "CIV_METODO": [""] * len(indirizzi)})
     if d.empty:
         return esito
     nv = [stradario.normalizza_indirizzo(i) for i in indirizzi]
     abbinate = vie_osm.abbina(sorted({v for v, _ in nv} - {""}), sorted(set(d["ODONIMO"])))
     civici = set(zip(d["ODONIMO"], d["CIVICO"].dropna().astype(int)))
-    pos = d.dropna(subset=["CIVICO", "LAT"]).assign(CIVICO=lambda x: x["CIVICO"].astype(int)) \
-        .groupby(["ODONIMO", "CIVICO"])[["LAT", "LON"]].median()
-    posizioni = dict(zip(pos.index, zip(pos["LAT"], pos["LON"])))
-    via_a, esiste, lat, lon = [], [], [], []
+    con = d.dropna(subset=["CIVICO", "LAT"]).assign(CIVICO=lambda x: x["CIVICO"].astype(int))
+    pos = con.groupby(["ODONIMO", "CIVICO"]).agg(LAT=("LAT", "median"), LON=("LON", "median"), METODO=("METODO", "max"))
+    posizioni = dict(zip(pos.index, zip(pos["LAT"], pos["LON"], pos["METODO"])))
+    via_a, esiste, lat, lon, metodo = [], [], [], [], []
     for via, civico in nv:
         odonimo = abbinate.get(via, "")
         via_a.append(odonimo)
@@ -66,12 +67,16 @@ def civici_per_indirizzo(comune: str, indirizzi) -> pd.DataFrame:
             esiste.append(None)
             lat.append(float("nan"))
             lon.append(float("nan"))
+            metodo.append("")
             continue
         esiste.append((odonimo, civico) in civici)
-        la, lo = posizioni.get((odonimo, civico), (float("nan"), float("nan")))
+        la, lo, me = posizioni.get((odonimo, civico), (float("nan"), float("nan"), ""))
         lat.append(la)
         lon.append(lo)
-    esito = pd.DataFrame({"VIA_ANNCSU": via_a, "CIVICO_ESISTE": esiste, "CIV_LAT": lat, "CIV_LON": lon})
+        metodo.append(me)
+    # METODO (metadati ANNCSU): 1/2 rilievo sul campo (<5 m / >=5 m), 3/4 da
+    # base dati territoriale (<5 m / >=5 m), 5 dal Portale per i Comuni.
+    esito = pd.DataFrame({"VIA_ANNCSU": via_a, "CIVICO_ESISTE": esiste, "CIV_LAT": lat, "CIV_LON": lon, "CIV_METODO": metodo})
     return esito
 
 

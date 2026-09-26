@@ -95,6 +95,18 @@ DISTANZA_MAX_DA_VIA_OSM_M = 150
 # cortile o sul retro): la fonte piu' precisa, prima di OSM e dei vicini.
 DISTANZA_MAX_DA_CIVICO_M = 150
 
+# Coordinata proposta a Neta: affidabilita' (Daniele, 26/09/2026: proporre
+# solo stime affidabili). Controlli incrociati sulla proposta: nel comune
+# giusto (ISTAT), vicina alla sua via in OSM, nel distretto delle altre fonti.
+DISTANZA_PROPOSTA_DA_VIA_OSM_M = 60
+# Interpolazione lungo la via OSM tra due civici vicini dallo stesso lato:
+# prese di riferimento solo se entro tanti metri dal tracciato; affidabilita'
+# media se i due civici distano (lungo la via) al massimo GAP_MEDIA, oltre
+# bassa, oltre GAP_MAX non si interpola.
+DISTANZA_RIFERIMENTO_DA_VIA_M = 30
+GAP_INTERPOLAZIONE_MEDIA_M = 100
+GAP_INTERPOLAZIONE_MAX_M = 300
+
 # Distretti soppressi, fusi in un altro (elenco in motore_calcolo, che nel
 # calcolo li unisce gia' al distretto nuovo): qui le loro prese vanno
 # associate in automatico al distretto nuovo e finiscono nel file per Neta
@@ -651,6 +663,7 @@ def prese_comune(comune: str) -> pd.DataFrame:
     p["CIV_LAT"] = civ["CIV_LAT"].to_numpy()
     p["CIV_LON"] = civ["CIV_LON"].to_numpy()
     p["CIVICO_ESISTE"] = civ["CIVICO_ESISTE"].to_numpy()
+    p["CIV_METODO"] = civ["CIV_METODO"].astype(str).to_numpy()
     p["D_CIVICO"] = _distretti_sicuri(p["CIV_LAT"].to_numpy(dtype=float), p["CIV_LON"].to_numpy(dtype=float))
     osm_via = _distretto_osm_unico(comune, [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]])
     p["D_OSM"] = [osm_via.get(stradario.normalizza_indirizzo(i)[0], "") for i in p["INDIRIZZO"]]
@@ -848,7 +861,7 @@ def _versione_dati() -> tuple:
     file = tuple(
         (p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None
         for p in (motore_calcolo.PERCORSO_CONFINI_DISTRETTI, motore_calcolo.PERCORSO_MAPPA_DISTRETTI,
-                  stradario.PERCORSO_STRADARIO, PERCORSO_CONFINI_COMUNI)
+                  stradario.PERCORSO_STRADARIO, PERCORSO_CONFINI_COMUNI, anncsu.PERCORSO_ANNCSU, vie_osm.PERCORSO_VIE_OSM)
     )
     return dati + file
 
@@ -1036,6 +1049,107 @@ def distretti_osm_per_via(comune: str, vie_neta: list[str]) -> dict[str, tuple[s
     }
 
 
+def interpolazione_lungo_via(p: pd.DataFrame, comune: str, chiavi: set[str]) -> dict[str, tuple[float, float, int]]:
+    """{chiave: (lat, lon, distanza tra i due civici di riferimento)} per
+    le prese in `chiavi` con via abbinata a OSM: il civico si colloca sul
+    tracciato della via tra il civico piu' vicino sotto e quello sopra dallo
+    stesso lato (pari/dispari), in proporzione al numero. Riferimenti: prese
+    della stessa via con coordinata entro DISTANZA_RIFERIMENTO_DA_VIA_M dal
+    tracciato, non segnaposto e non da correggere. Serve nei comuni senza i
+    civici ANNCSU posizionati."""
+    osm = vie_osm.vie_comune(comune)
+    if not osm or not chiavi:
+        return {}
+    v = p[p["COORD_VALIDE"]]
+    nv_tutte = [stradario.normalizza_indirizzo(i) for i in p["INDIRIZZO"]]
+    vie_obiettivo = {nv_tutte[i][0] for i, k in enumerate(p["CHIAVE"]) if k in chiavi and nv_tutte[i][1] is not None}
+    abbinate = vie_osm.abbina(sorted({x for x, _ in nv_tutte} - {""}), list(osm))
+    escluse = chiavi | set(coordinate_condivise(p))
+    esito = {}
+    per_via_rif: dict[str, list] = {}
+    for k, ind, la, lo in zip(v["CHIAVE"], v["INDIRIZZO"], v["LAT"], v["LON"]):
+        vv, n = stradario.normalizza_indirizzo(ind)
+        if vv in vie_obiettivo and n is not None and k not in escluse:
+            per_via_rif.setdefault(vv, []).append((n, float(la), float(lo)))
+    per_via_obiettivo: dict[str, list] = {}
+    for i, k in enumerate(p["CHIAVE"]):
+        vv, n = nv_tutte[i]
+        if k in chiavi and n is not None:
+            per_via_obiettivo.setdefault(vv, []).append((k, n))
+    for via in vie_obiettivo & set(abbinate):
+        tratti = osm[abbinate[via]]
+        # Riferimenti: (civico, tratto, posizione lungo il tratto)
+        rif: dict[int, list[tuple[int, float]]] = {}
+        for n, la, lo in per_via_rif.get(via, []):
+            pr = vie_osm.proietta(la, lo, tratti)
+            if pr and pr[2] <= DISTANZA_RIFERIMENTO_DA_VIA_M:
+                rif.setdefault(n, []).append((pr[0], pr[1]))
+        punti = {n: (l[0][0], float(np.median([x for _, x in l]))) for n, l in rif.items()
+                 if len({tr for tr, _ in l}) == 1}
+        for k, n in per_via_obiettivo.get(via, []):
+            sotto = [c for c in punti if c < n and c % 2 == n % 2]
+            sopra = [c for c in punti if c > n and c % 2 == n % 2]
+            if not sotto or not sopra:
+                continue
+            c1, c2 = max(sotto), min(sopra)
+            (t1, s1), (t2, s2) = punti[c1], punti[c2]
+            gap = abs(s2 - s1)
+            if t1 != t2 or gap > GAP_INTERPOLAZIONE_MAX_M:
+                continue
+            la, lo = vie_osm.punto_lungo(tratti[t1], s1 + (s2 - s1) * (n - c1) / (c2 - c1))
+            esito[k] = (round(la, 6), round(lo, 6), int(round(gap)))
+    return esito
+
+
+def _affidabilita_proposte(p: pd.DataFrame, comune: str, righe: np.ndarray, lat_c: pd.Series, lon_c: pd.Series,
+                           fonte_c: pd.Series, base: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Controlli incrociati sulle coordinate proposte: nel comune giusto
+    (confini ISTAT), entro DISTANZA_PROPOSTA_DA_VIA_OSM_M dalla sua via in
+    OSM, nel distretto delle altre fonti dell'indirizzo (stradario, via OSM).
+    Ogni controllo fallito abbassa di un livello (alta -> media -> bassa).
+    Restituisce (affidabilita', nota con fonte ed esito dei controlli).
+    Tutto a blocchi: una proposta alla volta erano ~2 minuti per i 22 comuni."""
+    livelli = ["bassa", "media", "alta"]
+    aff = pd.Series("", index=p.index)
+    nota = pd.Series("", index=p.index)
+    if not len(righe):
+        return aff, nota
+    la = lat_c.to_numpy(dtype=float)[righe]
+    lo = lon_c.to_numpy(dtype=float)[righe]
+    controlli = [[] for _ in righe]
+    falliti = np.zeros(len(righe), dtype=int)
+
+    if _poligoni_comuni():
+        dove = _comune_della_posizione(la, lo)
+        for k, d in enumerate(dove):
+            ok = _nome_comune(d.split(" (")[0]) == _nome_comune(comune)
+            controlli[k].append(f"comune {'✓' if ok else '✗ (' + (d or 'fuori') + ')'}")
+            falliti[k] += not ok
+
+    osm = vie_osm.vie_comune(comune)
+    if osm:
+        vie = [stradario.normalizza_indirizzo(p["INDIRIZZO"].iloc[i])[0] for i in righe]
+        abbinate = vie_osm.abbina(sorted({stradario.normalizza_indirizzo(x)[0] for x in p["INDIRIZZO"]} - {""}), list(osm))
+        for via in set(vie) & set(abbinate):
+            ks = np.array([k for k, v in enumerate(vie) if v == via])
+            dist = vie_osm.distanza_m(la[ks], lo[ks], osm[abbinate[via]])
+            for k, d in zip(ks, dist):
+                ok = d <= DISTANZA_PROPOSTA_DA_VIA_OSM_M
+                controlli[k].append(f"via OSM {'✓' if ok else '✗'} ({round(d)} m)")
+                falliti[k] += not ok
+
+    d_punto = _distretti_sicuri(la, lo)
+    for k, i in enumerate(righe):
+        altre = {x for x in (p["D_STRADARIO"].iloc[i], p["D_OSM"].iloc[i]) if x}
+        if altre:
+            ok = not d_punto[k] or d_punto[k] in altre
+            controlli[k].append(f"distretto {'✓' if ok else '✗ (' + d_punto[k] + ')'}")
+            falliti[k] += not ok
+        aff.iloc[i] = livelli[max(0, livelli.index(base.iloc[i]) - falliti[k])]
+        nota.iloc[i] = f"{fonte_c.iloc[i]}; controlli: {', '.join(controlli[k]) or 'nessuno disponibile'}"
+    return aff, nota
+
+
 def coordinate_condivise(p: pd.DataFrame) -> dict[str, int]:
     """{chiave presa: numero di vie} per le prese la cui coordinata (al
     metro) e' usata anche da prese di altre vie: una coordinata segnaposto,
@@ -1140,7 +1254,28 @@ def _coordinata_non_valida(lat, lon, comune: str) -> tuple[str, tuple[float, flo
     return f"Coordinate fuori provincia ({lat:.4f}, {lon:.4f})", None
 
 
+_CACHE_COORDINATE: dict = {"versione": None, "dati": {}}
+_LOCK_COORDINATE = threading.Lock()
+
+
 def coordinate_da_verificare(comune: str) -> pd.DataFrame:
+    """Come _coordinate_da_verificare, in memoria finche' i dati non cambiano
+    (circa un minuto per i 22 comuni: si calcola in background dopo ogni
+    caricamento, poi Excel e invii sono immediati)."""
+    versione = _versione_dati()
+    with _LOCK_COORDINATE:
+        if _CACHE_COORDINATE["versione"] != versione:
+            _CACHE_COORDINATE.update(versione=versione, dati={})
+        if comune in _CACHE_COORDINATE["dati"]:
+            return _CACHE_COORDINATE["dati"][comune].copy()
+    risultato = _coordinate_da_verificare(comune)
+    with _LOCK_COORDINATE:
+        if _CACHE_COORDINATE["versione"] == versione:
+            _CACHE_COORDINATE["dati"][comune] = risultato
+    return risultato.copy()
+
+
+def _coordinate_da_verificare(comune: str) -> pd.DataFrame:
     """Prese del comune con coordinate da far verificare a Neta (Daniele,
     25/09/2026), ricalcolate a ogni estrazione indipendentemente dalle
     conferme del distretto: una presa resta qui finche' Neta non corregge
@@ -1247,14 +1382,48 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
         if not problema.iloc[i] and esiste is False:
             problema.iloc[i] = "Civico non presente in ANNCSU (indirizzo da verificare)"
 
-    # Coordinata proposta: se il civico e' in ANNCSU vince sempre il civico
-    # (Daniele, 25/09/2026: ogni proposta con la sua fonte).
+    # Coordinata proposta, dalla fonte piu' affidabile (Daniele, 25-26/09/2026:
+    # ogni proposta con la sua fonte, e solo se la stima e' affidabile):
+    # 1. civico ANNCSU: alta (metodi 1-4, rilievo o cartografia), media
+    #    (metodo 5, dal Portale per i Comuni, senza accuratezza dichiarata);
+    # 2. correzione del formato (virgola persa, lat/lon invertite): alta;
+    # 3. interpolazione lungo la via OSM tra due civici: media se i civici
+    #    distano al massimo GAP_INTERPOLAZIONE_MEDIA_M, altrimenti bassa;
+    # 4. stima dai civici vicini: bassa.
+    # Poi i controlli incrociati abbassano il livello; le proposte "bassa"
+    # non si danno a Neta: "da rilevare sul posto".
+    base = pd.Series("", index=p.index)
     civ = p["CIV_LAT"].notna() & (problema != "")
     lat_c[civ] = p.loc[civ, "CIV_LAT"].round(6)
     lon_c[civ] = p.loc[civ, "CIV_LON"].round(6)
-    fonte_c[civ] = "civico ANNCSU"
+    fonte_c[civ] = [
+        "civico ANNCSU (" + {"1": "rilievo sul campo, < 5 m", "2": "rilievo sul campo, >= 5 m", "3": "cartografia, < 5 m",
+                             "4": "cartografia, >= 5 m", "5": "Portale per i Comuni"}.get(str(m), "metodo non indicato") + ")"
+        for m in p.loc[civ, "CIV_METODO"]
+    ]
+    base[civ] = ["alta" if str(m) in ("1", "2", "3", "4") else "media" for m in p.loc[civ, "CIV_METODO"]]
+    base[(fonte_c == "correzione del formato") & ~civ] = "alta"
+    da_stimare = {k for k, pr, la in zip(p["CHIAVE"], problema, lat_c) if pr and pd.isna(la)} | \
+                 {k for k, pr, f in zip(p["CHIAVE"], problema, fonte_c) if pr and f == "stima dai civici vicini"}
+    interp = interpolazione_lungo_via(p, comune, da_stimare)
+    for i, k in enumerate(p["CHIAVE"]):
+        if k in interp and not civ.iloc[i]:
+            la, lo, gap = interp[k]
+            lat_c.iloc[i], lon_c.iloc[i] = la, lo
+            fonte_c.iloc[i] = f"interpolazione lungo la via (OSM), civici di riferimento a {gap} m"
+            base.iloc[i] = "media" if gap <= GAP_INTERPOLAZIONE_MEDIA_M else "bassa"
+    base[(fonte_c == "stima dai civici vicini") & (base == "")] = "bassa"
 
-    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c, FONTE_COORDINATA=fonte_c)
+    righe = np.nonzero((problema != "").to_numpy() & lat_c.notna().to_numpy())[0]
+    affidabilita, nota = _affidabilita_proposte(p, comune, righe, lat_c, lon_c, fonte_c, base)
+    bassa = affidabilita == "bassa"
+    lat_c[bassa] = np.nan
+    lon_c[bassa] = np.nan
+    nota[bassa] = "stima non affidabile, da rilevare sul posto — " + nota[bassa]
+    nota[(problema != "") & (affidabilita == "")] = "nessuna stima possibile, da rilevare sul posto"
+
+    p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c,
+                 FONTE_COORDINATA=fonte_c, AFFIDABILITA=affidabilita, NOTA_PROPOSTA=nota)
     return p[p["PROBLEMA"] != ""].reset_index(drop=True)
 
 
@@ -1266,7 +1435,7 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
         "PROBLEMA": "Problema", "DISTANZA_M": "Distanza (m)", "LAT": "Latitudine", "LON": "Longitudine",
         "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
-        "FONTE_COORDINATA": "Fonte della coordinata proposta",
+        "AFFIDABILITA": "Affidabilita' della proposta", "NOTA_PROPOSTA": "Fonte e controlli della proposta",
     }
     if parti:
         df = pd.concat(parti, ignore_index=True)
@@ -1274,16 +1443,7 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
         df = df[list(colonne)].rename(columns=colonne)
     else:
         df = pd.DataFrame(columns=list(colonne.values()))
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Coordinate")
-        foglio = writer.sheets["Coordinate"]
-        for i, col in enumerate(df.columns, start=1):
-            larghezza = min(60, max(10, len(col) + 2, *(len(str(v)) + 2 for v in df[col].head(500))))
-            foglio.column_dimensions[foglio.cell(row=1, column=i).column_letter].width = larghezza
-        foglio.freeze_panes = "A2"
-        foglio.auto_filter.ref = foglio.dimensions
-    return buffer.getvalue()
+    return _excel(df, "Coordinate", LEGENDA_COORDINATE)
 
 
 # ---------------------------------------------------------------------------
@@ -1372,11 +1532,34 @@ def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int,
         colonne = {**comuni_col, "VALORE": "Problema", "DISTANZA_M": "Distanza (m)", "INVIATA_PRIMA": "Gia' inviata",
                    "LAT": "Latitudine", "LON": "Longitudine",
                    "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
-                   "FONTE_COORDINATA": "Fonte della coordinata proposta"}
-    return id_invio, len(df), _excel(df[list(colonne)].rename(columns=colonne), "Distretti" if tipo == "distretti" else "Coordinate")
+                   "AFFIDABILITA": "Affidabilita' della proposta", "NOTA_PROPOSTA": "Fonte e controlli della proposta"}
+    return id_invio, len(df), _excel(df[list(colonne)].rename(columns=colonne), "Distretti" if tipo == "distretti" else "Coordinate",
+                                     None if tipo == "distretti" else LEGENDA_COORDINATE)
 
 
-def _excel(df: pd.DataFrame, foglio_nome: str) -> bytes:
+LEGENDA_COORDINATE = [
+    ("Cosa contiene", "Prese con la coordinata da verificare. Una riga per presa, i codici servizio nella stessa cella. "
+                      "Ricalcolato a ogni estrazione: una presa resta finche' la coordinata non viene corretta."),
+    ("Problema", "Coordinate mancanti, a 0,0 o fuori provincia; virgola mancante o latitudine/longitudine invertite; "
+                 "fuori dal comune (confini ISTAT); coordinata segnaposto (stesso punto per prese di 3 o piu' vie); "
+                 "lontana dal suo civico ANNCSU (oltre 150 m); lontana dalla sua via in OpenStreetMap (oltre 150 m) "
+                 "o dal resto della via; in un altro distretto rispetto all'indirizzo; civico non presente in ANNCSU."),
+    ("Distanza (m)", "Quanto la coordinata attuale dista dal riferimento del problema (civico, via, confine del comune)."),
+    ("Latitudine / Longitudine", "La coordinata attuale, quella da correggere."),
+    ("Latitudine / Longitudine corretta (proposta)", "La coordinata da inserire, solo se la stima e' affidabile (alta o media)."),
+    ("Affidabilita' - alta", "Civico ANNCSU posizionato dal Comune (rilievo o cartografia) oppure correzione del formato, "
+                             "e tutti i controlli incrociati superati."),
+    ("Affidabilita' - media", "Civico ANNCSU inserito dal Portale per i Comuni, oppure interpolazione lungo la via tra due "
+                              "civici vicini (entro 100 m), oppure una fonte 'alta' con un controllo non superato."),
+    ("Affidabilita' - bassa", "Stima non affidabile: nessuna coordinata proposta, da rilevare sul posto."),
+    ("Fonte e controlli della proposta", "Da dove viene la proposta e l'esito dei controlli: comune giusto (ISTAT), "
+                                         "vicina alla sua via in OpenStreetMap (entro 60 m), nel distretto indicato "
+                                         "dalle altre fonti. ✓ superato, ✗ non superato."),
+    ("Fonti", "ANNCSU - Agenzia delle Entrate e ISTAT (CC-BY 4.0); confini ISTAT; (c) OpenStreetMap contributors (ODbL)."),
+]
+
+
+def _excel(df: pd.DataFrame, foglio_nome: str, legenda: list[tuple[str, str]] | None = None) -> bytes:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name=foglio_nome)
@@ -1386,6 +1569,11 @@ def _excel(df: pd.DataFrame, foglio_nome: str) -> bytes:
             foglio.column_dimensions[foglio.cell(row=1, column=i).column_letter].width = larghezza
         foglio.freeze_panes = "A2"
         foglio.auto_filter.ref = foglio.dimensions
+        if legenda:
+            pd.DataFrame(legenda, columns=["Voce", "Spiegazione"]).to_excel(writer, index=False, sheet_name="Legenda")
+            fl = writer.sheets["Legenda"]
+            fl.column_dimensions["A"].width = 42
+            fl.column_dimensions["B"].width = 120
     return buffer.getvalue()
 
 

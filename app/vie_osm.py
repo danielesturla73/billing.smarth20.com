@@ -163,3 +163,43 @@ def distanza_m(lat: np.ndarray, lon: np.ndarray, tratti: list[np.ndarray]) -> np
         s = np.clip(((px - ax) * dx + (py - ay) * dy) / l2, 0, 1)
         migliore = np.minimum(migliore, np.sqrt((px - ax - s * dx) ** 2 + (py - ay - s * dy) ** 2).min(axis=1))
     return migliore
+
+
+def _metri(tratto: np.ndarray, lat0: float) -> tuple[np.ndarray, float, float]:
+    kx, ky = 111_320 * math.cos(math.radians(lat0)), 110_540
+    return np.column_stack([tratto[:, 0] * kx, tratto[:, 1] * ky]), kx, ky
+
+
+def proietta(lat: float, lon: float, tratti: list[np.ndarray]) -> tuple[int, float, float] | None:
+    """(indice del tratto piu' vicino, distanza lungo il tratto dal suo
+    inizio, distanza dal tratto), tutto in metri; None se non ci sono tratti."""
+    migliore = None
+    for k, t in enumerate(tratti):
+        xy, kx, ky = _metri(t, lat)
+        px, py = lon * kx, lat * ky
+        a, b = xy[:-1], xy[1:]
+        d = b - a
+        l2 = np.where((d ** 2).sum(axis=1) == 0, 1, (d ** 2).sum(axis=1))
+        s = np.clip(((px - a[:, 0]) * d[:, 0] + (py - a[:, 1]) * d[:, 1]) / l2, 0, 1)
+        qx, qy = a[:, 0] + s * d[:, 0], a[:, 1] + s * d[:, 1]
+        dist = np.hypot(px - qx, py - qy)
+        i = int(dist.argmin())
+        lunghezze = np.hypot(d[:, 0], d[:, 1])
+        lungo = float(lunghezze[:i].sum() + s[i] * lunghezze[i])
+        if migliore is None or dist[i] < migliore[2]:
+            migliore = (k, lungo, float(dist[i]))
+    return migliore
+
+
+def punto_lungo(tratto: np.ndarray, lungo: float) -> tuple[float, float]:
+    """(lat, lon) del punto a `lungo` metri dall'inizio del tratto."""
+    lat0 = float(tratto[:, 1].mean())
+    xy, kx, ky = _metri(tratto, lat0)
+    d = np.diff(xy, axis=0)
+    lunghezze = np.hypot(d[:, 0], d[:, 1])
+    cumul = np.concatenate([[0], np.cumsum(lunghezze)])
+    lungo = min(max(lungo, 0.0), float(cumul[-1]))
+    i = min(int(np.searchsorted(cumul, lungo, side="right")) - 1, len(d) - 1)
+    f = 0.0 if lunghezze[i] == 0 else (lungo - cumul[i]) / lunghezze[i]
+    x, y = xy[i] + f * d[i]
+    return y / ky, x / kx
