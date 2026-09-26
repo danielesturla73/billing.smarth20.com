@@ -859,14 +859,16 @@ _LOCK_RIEPILOGO = threading.Lock()
 
 
 def _versione_dati() -> tuple:
-    """Cambia quando cambia qualcosa che entra nel riepilogo: anagrafica
-    (caricamento di un'estrazione), conferme, file di
-    riferimento (confini, elenco distretti, stradario, comuni ISTAT)."""
+    """Cambia quando cambia qualcosa che vale per tutti i comuni: anagrafica
+    (caricamento di un'estrazione) e file di riferimento (confini, elenco
+    distretti, stradario, comuni ISTAT, ANNCSU, vie OSM). Le conferme no:
+    hanno una versione per comune (_versione_conferme), cosi' una conferma
+    non fa ricalcolare tutti i comuni ne' il file coordinate (Daniele,
+    26/09/2026: "quando confermo quando rifai i calcoli?")."""
     with database.connessione() as conn:
         assicura_tabelle(conn)
         dati = (
             tuple(conn.execute("SELECT COUNT(*), MAX(AGGIORNATO_IL), MAX(DATA_ESTRAZIONE) FROM anagrafica_servizi").fetchone()),
-            tuple(conn.execute("SELECT COUNT(*), MAX(QUANDO), TOTAL(LENGTH(DISTRETTO || DP) + VALIDATA) FROM prese_assegnazioni").fetchone()),
         )
     file = tuple(
         (p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None
@@ -876,19 +878,31 @@ def _versione_dati() -> tuple:
     return dati + file
 
 
+def _versione_conferme(comune: str) -> tuple:
+    """Cambia quando cambiano le conferme (o gli invii) di UN comune."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        return tuple(conn.execute(
+            "SELECT COUNT(*), MAX(QUANDO), TOTAL(LENGTH(DISTRETTO || DP) + VALIDATA) FROM prese_assegnazioni WHERE LOCALITA = ?",
+            (comune.strip().upper(),)).fetchone()) + tuple(conn.execute(
+            "SELECT COUNT(*) FROM invii_neta_prese WHERE LOCALITA = ?", (comune.strip().upper(),)).fetchone())
+
+
 def riepilogo_comuni(comuni: list[str]) -> list[dict]:
     """Conteggi per la pagina Prese senza comune scelto, tenuti in memoria
     e ricalcolati solo quando cambiano i dati (Daniele, 25/09/2026: prima
-    ~4 s a ogni apertura, ~10 s con le coordinate)."""
+    ~4 s a ogni apertura, ~10 s con le coordinate). Una conferma fa
+    ricalcolare solo il suo comune."""
     with _LOCK_RIEPILOGO:
         versione = _versione_dati()
         if _CACHE_RIEPILOGO["versione"] != versione:
             _CACHE_RIEPILOGO.update(versione=versione, righe={})
         righe = _CACHE_RIEPILOGO["righe"]
-        mancanti = [c for c in comuni if c not in righe]
+        conferme = {c: _versione_conferme(c) for c in comuni}
+        mancanti = [c for c in comuni if c not in righe or righe[c][0] != conferme[c]]
         for comune, riga in zip(mancanti, _calcola_riepilogo(mancanti)):
-            righe[comune] = riga
-        return [righe[c] for c in comuni]
+            righe[comune] = (conferme[comune], riga)
+        return [righe[c][1] for c in comuni]
 
 
 def aggiorna_riepilogo_in_background(comuni: list[str]) -> None:
@@ -1619,15 +1633,17 @@ _CACHE_APERTE: dict = {"versione": None, "dati": {}}
 
 def _aperte_in_memoria(tipo: str, comune: str) -> list[str]:
     """Chiavi delle prese ancora aperte per tipo e comune, in memoria finche'
-    i dati non cambiano (le coordinate di tutti i comuni costano secondi)."""
+    i dati non cambiano (le coordinate di tutti i comuni costano secondi).
+    Per i distretti conta anche la versione delle conferme del comune."""
     versione = _versione_dati()
     if _CACHE_APERTE["versione"] != versione:
         _CACHE_APERTE.update(versione=versione, dati={})
     chiave = (tipo, comune)
-    if chiave not in _CACHE_APERTE["dati"]:
+    extra = _versione_conferme(comune) if tipo == "distretti" else ()
+    if chiave not in _CACHE_APERTE["dati"] or _CACHE_APERTE["dati"][chiave][0] != extra:
         p = _da_inviare(tipo, comune)
-        _CACHE_APERTE["dati"][chiave] = [] if p.empty else list(p["CHIAVE"])
-    return _CACHE_APERTE["dati"][chiave]
+        _CACHE_APERTE["dati"][chiave] = (extra, [] if p.empty else list(p["CHIAVE"]))
+    return _CACHE_APERTE["dati"][chiave][1]
 
 
 def distretti_noti() -> set[str]:

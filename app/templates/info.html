@@ -165,6 +165,20 @@
   <p>Fanno eccezione gli <strong>anni consolidati</strong> (vedi la pagina <a href="/pagine/consolidamento">Consolidamento</a>):
     a fine anno si salva una copia fissa del bilancio e da quel momento i mesi di quell'anno non cambiano più.</p>
 
+  <h3>Quando si rifanno i calcoli</h3>
+  <ul>
+    <li><strong>Quando confermi, togli o sposti una presa</strong>: l'app ricalcola da sola, subito e in background, i volumi
+      <em>di quel comune</em>. Ci vogliono pochi secondi (i comuni piccoli 2-3 s, Voghera circa 10 s). Se nel frattempo apri
+      la pagina Volumi del comune, la pagina aspetta la fine del ricalcolo e mostra già i numeri nuovi. Anche i conteggi del
+      tab Prese si aggiornano subito, solo per quel comune.</li>
+    <li><strong>Quando carichi un'estrazione di Neta</strong>: si ricalcolano volumi, prese e coordinate di quel comune.</li>
+    <li><strong>Quando cambiano i file di riferimento</strong> (confini, elenco distretti, stradario, civici ANNCSU, vie
+      OSM): si ricalcola tutto, in background.</li>
+    <li>Le conferme <strong>non</strong> cambiano il file delle coordinate da verificare, che dipende solo dalle coordinate
+      di Neta e dalle fonti esterne.</li>
+    <li>I mesi degli <strong>anni consolidati</strong> non cambiano mai, qualunque cosa succeda.</li>
+  </ul>
+
   <h3>Il file distretti per Neta</h3>
   <p>Contiene solo le prese confermate e non ancora sistemate da Neta, già validate da chi le ha confermate. Le colonne
     principali: <strong>Presa (DP)</strong>, <strong>Distretto corretto</strong> (quello da mettere), <strong>Vecchio

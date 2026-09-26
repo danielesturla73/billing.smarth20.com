@@ -1596,8 +1596,10 @@ async def prese_assegna(request: Request):
         request.state.utente["username"], "prese_assegna",
         f"{comune}: {salvate} confermate, {tolte} tolte — {dettaglio}", accessi.ip_client(request),
     )
-    # Le conferme entrano nel calcolo: si ricalcolano i volumi del comune.
+    # Le conferme entrano nel calcolo: si ricalcolano subito, in background,
+    # i volumi del comune e la sua riga del riepilogo Prese (solo quella).
     _invalida_comune(comune)
+    prese.aggiorna_riepilogo_in_background(_comuni_disponibili())
     return {"salvate": salvate, "tolte": tolte}
 
 
