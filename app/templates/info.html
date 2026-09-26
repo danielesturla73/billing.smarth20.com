@@ -167,10 +167,14 @@
 
   <h3>Quando si rifanno i calcoli</h3>
   <ul>
-    <li><strong>Quando confermi, togli o sposti una presa</strong>: l'app ricalcola da sola, subito e in background, i volumi
-      <em>di quel comune</em>. Ci vogliono pochi secondi (i comuni piccoli 2-3 s, Voghera circa 10 s). Se nel frattempo apri
-      la pagina Volumi del comune, la pagina aspetta la fine del ricalcolo e mostra già i numeri nuovi. Anche i conteggi del
-      tab Prese si aggiornano subito, solo per quel comune.</li>
+    <li><strong>Quando confermi, togli o sposti una presa alla volta</strong>: l'app non ricalcola a ogni clic. Aspetta
+      <strong>2 minuti dall'ultima conferma</strong> (ogni conferma nuova fa ripartire l'attesa), poi ricalcola una volta
+      sola, in background, i volumi e i conteggi <em>di quel comune</em>. Così puoi confermare tante prese di seguito senza
+      rallentamenti.</li>
+    <li><strong>Quando confermi tante prese insieme</strong> (proposte sicure, una zona): il ricalcolo parte dopo pochi
+      secondi, una volta sola.</li>
+    <li>Se apri la pagina Volumi prima che il ricalcolo sia partito, i numeri vengono ricalcolati in quel momento (qualche
+      secondo, Voghera circa 10): non vedi mai numeri vecchi.</li>
     <li><strong>Quando carichi un'estrazione di Neta</strong>: si ricalcolano volumi, prese e coordinate di quel comune.</li>
     <li><strong>Quando cambiano i file di riferimento</strong> (confini, elenco distretti, stradario, civici ANNCSU, vie
       OSM): si ricalcola tutto, in background.</li>

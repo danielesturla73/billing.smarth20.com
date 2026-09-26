@@ -441,6 +441,38 @@ def _invalida_comune(comune: str) -> None:
     threading.Thread(target=lambda: list(_risultati_per_comune(comune)), daemon=True).start()
 
 
+# Ricalcolo dopo le conferme del tab Prese, rimandato (Daniele, 26/09/2026:
+# chi conferma una presa alla volta non deve far ricalcolare a ogni clic).
+# Un timer per comune: ogni conferma lo fa ripartire; quando scade si
+# ricalcolano volumi e riepilogo Prese in background. Intanto la cache del
+# comune e' gia' vuota, quindi chi apre una pagina vede comunque i numeri
+# giusti (ricalcolati in quel momento).
+RITARDO_RICALCOLO_S = 120          # conferma di una presa alla volta
+RITARDO_RICALCOLO_GRUPPO_S = 5     # conferma di piu' prese insieme
+_TIMER_RICALCOLO: dict[str, threading.Timer] = {}
+_LOCK_TIMER = threading.Lock()
+
+
+def _programma_ricalcolo(comune: str, ritardo: float) -> None:
+    with _LOCK_CACHE:
+        _CACHE_RISULTATI.pop(_chiave_comune(comune), None)
+
+    def _lavoro():
+        with _LOCK_TIMER:
+            _TIMER_RICALCOLO.pop(comune, None)
+        list(_risultati_per_comune(comune))
+        prese.riepilogo_comuni(_comuni_disponibili())
+
+    with _LOCK_TIMER:
+        vecchio = _TIMER_RICALCOLO.pop(comune, None)
+        if vecchio:
+            vecchio.cancel()
+        timer = threading.Timer(ritardo, _lavoro)
+        timer.daemon = True
+        _TIMER_RICALCOLO[comune] = timer
+        timer.start()
+
+
 def _risultati_per_comune(comune_filtro: str | None):
     """Metodo B sull'archivio storico (SQLite) di ogni comune, uno alla
     volta (mai comuni diversi insieme: vedi /riepilogo per il perche'),
@@ -1596,10 +1628,9 @@ async def prese_assegna(request: Request):
         request.state.utente["username"], "prese_assegna",
         f"{comune}: {salvate} confermate, {tolte} tolte — {dettaglio}", accessi.ip_client(request),
     )
-    # Le conferme entrano nel calcolo: si ricalcolano subito, in background,
-    # i volumi del comune e la sua riga del riepilogo Prese (solo quella).
-    _invalida_comune(comune)
-    prese.aggiorna_riepilogo_in_background(_comuni_disponibili())
+    # Le conferme entrano nel calcolo: ricalcolo del comune rimandato di
+    # qualche minuto (una presa alla volta) o di pochi secondi (tante insieme).
+    _programma_ricalcolo(comune, RITARDO_RICALCOLO_GRUPPO_S if len(voci) > 1 else RITARDO_RICALCOLO_S)
     return {"salvate": salvate, "tolte": tolte}
 
 

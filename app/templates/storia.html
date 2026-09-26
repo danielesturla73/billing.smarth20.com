@@ -194,9 +194,10 @@
       ricalcolo di oggi.</li>
     <li>File distretti per Neta semplificato: "Distretto corretto" in terza colonna, "Vecchio distretto", senza "distretto
       da assegnare", "stato" e "distretto dall'indirizzo".</li>
-    <li>Quando si conferma una presa si ricalcolano subito, in background, solo i volumi e i conteggi di quel comune (prima
-      una conferma faceva ricalcolare alla successiva apertura i conteggi e il file coordinate di tutti i comuni, circa un
-      minuto). Spiegato nella guida, "Quando si rifanno i calcoli".</li>
+    <li>Dopo le conferme si ricalcolano solo i volumi e i conteggi di quel comune, e non a ogni clic: 2 minuti dopo l'ultima
+      conferma singola, pochi secondi dopo una conferma di tante prese insieme. Prima una conferma faceva ricalcolare i
+      conteggi e il file coordinate di tutti i comuni, circa un minuto. Spiegato nella guida, "Quando si rifanno i
+      calcoli".</li>
   </ul>
 </div>
 {% endblock %}
