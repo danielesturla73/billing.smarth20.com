@@ -30,6 +30,14 @@ def assicura_tabelle(conn) -> None:
     conn.commit()
 
 
+def versione(comune: str) -> tuple:
+    """Cambia quando si consolida un anno che riguarda il comune."""
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        return tuple(conn.execute("SELECT COUNT(*), MAX(ANNO) FROM consolidato_volumi WHERE COMUNE = ?",
+                                  (comune.strip().upper(),)).fetchone())
+
+
 def anni_consolidati() -> list[dict]:
     with database.connessione() as conn:
         assicura_tabelle(conn)

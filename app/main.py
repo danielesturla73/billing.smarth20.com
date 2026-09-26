@@ -36,17 +36,22 @@ from urllib.parse import quote
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, auth, consolidamento, database, motore_calcolo, prese, stradario
+from app import accessi, auth, cache_disco, consolidamento, database, motore_calcolo, prese, stradario
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
     description="Consumi (da fatturazione) per distretto idrico, per il bilancio idrico e la riduzione delle perdite in WMS SmartH2O, a partire dalle estrazioni Neta H2O.",
     version="0.1.0",
 )
+# Pagine compresse (Daniele, 26/09/2026): la pagina Prese di Voghera pesava
+# 1,5 MB e la Mappa 0,9 MB; compresse circa un decimo.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 # Cache-busting per lo stylesheet: senza questo, il browser puo' tenere in
@@ -160,7 +165,9 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
                 percorso_salvato = INPUT_DIR / f"{radice.stem}_{progressivo}{radice.suffix}"
 
         try:
-            df = motore_calcolo.carica_estrazione(percorso_salvato)
+            # Il lavoro pesante in un thread: l'app (un solo processo) continua
+            # a rispondere agli altri utenti durante il caricamento.
+            df = await run_in_threadpool(motore_calcolo.carica_estrazione, percorso_salvato)
         except Exception as exc:
             messaggio = str(exc)
             if "Excel file format cannot be determined" in messaggio or "zip file" in messaggio.lower():
@@ -177,7 +184,7 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
         comune = motore_calcolo.comune_dominante(df) or "SCONOSCIUTO"
         # Anagrafica delle prese (coordinate/distretto dell'ultima estrazione,
         # vedi app/prese.py): dal file intero, prima della deduplica letture.
-        prese.aggiorna_anagrafica(df, percorso_salvato.name)
+        await run_in_threadpool(prese.aggiorna_anagrafica, df, percorso_salvato.name)
         risultati_file.append({
             "file": nome_originale,
             "salvato_come": percorso_salvato.name,
@@ -189,7 +196,7 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
 
     archivi_aggiornati = []
     for comune, percorsi in file_per_comune.items():
-        _, stats = database.aggiorna_letture(percorsi, comune)
+        _, stats = await run_in_threadpool(database.aggiorna_letture, percorsi, comune)
         _invalida_comune(comune)
         avvisi = []
         if comune == "SCONOSCIUTO":
@@ -420,14 +427,26 @@ def _risultato_in_cache(conn, comune: str):
         with _LOCK_CACHE:
             if chiave in _CACHE_RISULTATI:  # calcolato da un'altra richiesta nel frattempo
                 return _CACHE_RISULTATI[chiave]
-        df = database.carica_letture(conn, comune)
-        # Conferme del tab Prese nel calcolo, su tutta la storia; poi i mesi
-        # degli anni consolidati tornano quelli della copia fissa (Daniele,
-        # 26/09/2026).
-        risultato = None if df.empty else motore_calcolo.elabora_dataframe(df, prese.riassegnazioni_calcolo(comune))
-        if risultato is not None:
-            risultato.volumi_distretto_mese_calcolati = risultato.volumi_distretto_mese
-            risultato.volumi_distretto_mese = consolidamento.applica(risultato.volumi_distretto_mese, comune)
+        # Risultato gia' salvato su disco per gli stessi dati e lo stesso
+        # codice (vedi cache_disco): dopo un riavvio si ricarica in un attimo.
+        chiave_disco = (
+            comune, versione,
+            tuple(conn.execute("SELECT COUNT(*), MAX(rowid) FROM letture WHERE LOCALITA = ?", (comune,)).fetchone()),
+            tuple(conn.execute("SELECT COUNT(*), MAX(AGGIORNATO_IL) FROM anagrafica_servizi WHERE LOCALITA = ?",
+                               (comune.strip().upper(),)).fetchone()),
+            prese._versione_conferme(comune), consolidamento.versione(comune),
+        )
+        risultato = cache_disco.carica(f"metodo_b_{comune}", chiave_disco)
+        if risultato is None:
+            df = database.carica_letture(conn, comune)
+            # Conferme del tab Prese nel calcolo, su tutta la storia; poi i mesi
+            # degli anni consolidati tornano quelli della copia fissa (Daniele,
+            # 26/09/2026).
+            risultato = None if df.empty else motore_calcolo.elabora_dataframe(df, prese.riassegnazioni_calcolo(comune))
+            if risultato is not None:
+                risultato.volumi_distretto_mese_calcolati = risultato.volumi_distretto_mese
+                risultato.volumi_distretto_mese = consolidamento.applica(risultato.volumi_distretto_mese, comune)
+                cache_disco.salva(f"metodo_b_{comune}", chiave_disco, risultato)
         with _LOCK_CACHE:
             _CACHE_RISULTATI[chiave] = risultato
         return risultato
@@ -633,19 +652,21 @@ async def admin_consolida(request: Request):
     try:
         anno = int(str(form.get("anno", "")))
     except ValueError:
-        return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request, errore="Anno non valido."))
+        return templates.TemplateResponse(request, "consolidamento.html",
+                                          await run_in_threadpool(_contesto_consolidamento, request, "Anno non valido."))
     nota = str(form.get("nota", ""))
-    calcolati = {c: r.volumi_distretto_mese_calcolati for c, r in _risultati_per_comune(None)}
+    calcolati = await run_in_threadpool(lambda: {c: r.volumi_distretto_mese_calcolati for c, r in _risultati_per_comune(None)})
     try:
-        n = consolidamento.consolida(anno, calcolati, request.state.utente["username"], nota)
+        n = await run_in_threadpool(consolidamento.consolida, anno, calcolati, request.state.utente["username"], nota)
     except ValueError as exc:
-        return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request, errore=str(exc)))
+        return templates.TemplateResponse(request, "consolidamento.html",
+                                          await run_in_threadpool(_contesto_consolidamento, request, str(exc)))
     auth.registra(request.state.utente["username"], "consolida_anno", f"anno {anno}: {n} righe; nota: {nota}", accessi.ip_client(request))
     with _LOCK_CACHE:
         _CACHE_RISULTATI.clear()
     threading.Thread(target=lambda: list(_risultati_per_comune(None)), daemon=True).start()
-    return templates.TemplateResponse(request, "consolidamento.html",
-                                      _contesto_consolidamento(request, esito=f"Anno {anno} consolidato: {n} righe mese/distretto salvate."))
+    return templates.TemplateResponse(request, "consolidamento.html", await run_in_threadpool(
+        _contesto_consolidamento, request, "", f"Anno {anno} consolidato: {n} righe mese/distretto salvate."))
 
 
 @app.get("/pagine/riepilogo")
@@ -1006,7 +1027,7 @@ async def importa_distretti(request: Request, file: UploadFile = File(...)):
     errore = None
     esito = None
     try:
-        esito = motore_calcolo.importa_mappa_distretti(percorso_temp)
+        esito = await run_in_threadpool(motore_calcolo.importa_mappa_distretti, percorso_temp)
     except ValueError as exc:
         errore = str(exc)
     except Exception as exc:
@@ -1038,7 +1059,7 @@ async def importa_confini_endpoint(request: Request, file: UploadFile = File(...
     errore = None
     esito = None
     try:
-        esito = motore_calcolo.importa_confini_distretti(percorso_temp)
+        esito = await run_in_threadpool(motore_calcolo.importa_confini_distretti, percorso_temp)
     except ValueError as exc:
         errore = str(exc)
     except Exception as exc:
@@ -1643,7 +1664,7 @@ async def prese_stradario(request: Request):
     if comune not in [c.strip().upper() for c in _comuni_disponibili()]:
         raise HTTPException(status_code=400, detail=f"Comune '{comune}' non trovato.")
     try:
-        nuovo = prese.genera_stradario(comune)
+        nuovo = await run_in_threadpool(prese.genera_stradario, comune)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     a_cavallo = int((nuovo["distretto"] == "").sum())
@@ -1664,7 +1685,7 @@ async def prese_invio(request: Request):
     comune = str(form.get("comune", "")).strip().upper()
     comuni = [comune] if comune else _comuni_disponibili()
     try:
-        id_invio, n, contenuto = prese.registra_invio(tipo, comuni, request.state.utente["username"])
+        id_invio, n, contenuto = await run_in_threadpool(prese.registra_invio, tipo, comuni, request.state.utente["username"])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     auth.registra(

@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from app import anncsu, database, motore_calcolo, stradario, vie_osm
+from app import anncsu, cache_disco, database, motore_calcolo, stradario, vie_osm
 
 # DP segnaposto di Neta, non una presa vera: non raggruppa nulla, ogni
 # servizio resta una riga a se'. L'estrazione di Belgioioso di mag-giu 2026
@@ -900,7 +900,12 @@ def riepilogo_comuni(comuni: list[str]) -> list[dict]:
         righe = _CACHE_RIEPILOGO["righe"]
         conferme = {c: _versione_conferme(c) for c in comuni}
         mancanti = [c for c in comuni if c not in righe or righe[c][0] != conferme[c]]
-        for comune, riga in zip(mancanti, _calcola_riepilogo(mancanti)):
+        for comune in mancanti:
+            chiave = (comune, versione, conferme[comune])
+            riga = cache_disco.carica(f"riepilogo_prese_{comune}", chiave)
+            if riga is None:
+                riga = _calcola_riepilogo([comune])[0]
+                cache_disco.salva(f"riepilogo_prese_{comune}", chiave, riga)
             righe[comune] = (conferme[comune], riga)
         return [righe[c][1] for c in comuni]
 
@@ -1292,7 +1297,10 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
             _CACHE_COORDINATE.update(versione=versione, dati={})
         if comune in _CACHE_COORDINATE["dati"]:
             return _CACHE_COORDINATE["dati"][comune].copy()
-    risultato = _coordinate_da_verificare(comune)
+    risultato = cache_disco.carica(f"coordinate_{comune}", (comune, versione))
+    if risultato is None:
+        risultato = _coordinate_da_verificare(comune)
+        cache_disco.salva(f"coordinate_{comune}", (comune, versione), risultato)
     with _LOCK_COORDINATE:
         if _CACHE_COORDINATE["versione"] == versione:
             _CACHE_COORDINATE["dati"][comune] = risultato

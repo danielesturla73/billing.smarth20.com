@@ -14,6 +14,7 @@ contributors, ODbL.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -117,7 +118,14 @@ def abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     if chiave not in _CACHE_ABBINA:
         if len(_CACHE_ABBINA) > 200:
             _CACHE_ABBINA.clear()
-        _CACHE_ABBINA[chiave] = _abbina(vie_neta, nomi_osm)
+        # Anche su disco: il primo abbinamento di Voghera costa ~8 s.
+        from app import cache_disco
+        impronta = hashlib.sha256(repr(chiave).encode()).hexdigest()[:16]
+        esito = cache_disco.carica(f"abbina_{impronta}", chiave)
+        if esito is None:
+            esito = _abbina(vie_neta, nomi_osm)
+            cache_disco.salva(f"abbina_{impronta}", chiave, esito)
+        _CACHE_ABBINA[chiave] = esito
     return dict(_CACHE_ABBINA[chiave])
 
 
