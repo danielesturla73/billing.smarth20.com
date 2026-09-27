@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block titolo %}Dati di riferimento — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Amministrazione</h1>
+<div class="sotto-tab">
+  <a href="/admin/utenti">Utenti</a>
+  <a href="/admin/registro">Registro azioni</a>
+  <a href="/admin/riferimenti" class="attivo">Dati di riferimento</a>
+</div>
+{% if msg %}<div class="esito-ok">{{ msg }}</div>{% endif %}
+
+<div class="panel">
+  <h2>Dati di riferimento esterni</h2>
+  <p class="nota-metodologica">
+    Sono i dati che l'app usa per controllare le prese senza fidarsi solo di Neta. I civici ANNCSU cambiano ogni mese
+    (i Comuni aggiungono civici e coordinate): conviene aggiornarli una volta al mese. Le vie di OpenStreetMap cambiano
+    più di rado. L'aggiornamento gira in background: si può continuare a usare l'app, e alla fine i controlli delle prese
+    si ricalcolano da soli. Lo <strong>stradario</strong> invece non si rigenera da solo (potresti averlo corretto a
+    mano): per usare i civici nuovi rigeneralo dal tab Prese, comune per comune.
+  </p>
+  <table>
+    <thead><tr><th>Dato</th><th>Aggiornato al</th><th>Contenuto</th><th>Stato</th><th></th></tr></thead>
+    <tbody>
+    {% for r in riferimenti %}
+      <tr>
+        <td><strong>{{ r.nome }}</strong><br><span class="testo-tenue">{{ r.fonte }}</span></td>
+        <td>{{ r.data or '—' }}{% if r.vecchio %}<br><span class="badge stimato">più di un mese fa</span>{% endif %}</td>
+        <td class="testo-tenue">{{ r.contenuto }}</td>
+        <td>{% if r.stato.in_corso %}<span class="badge stimato">aggiornamento in corso, dal {{ r.stato.inizio }}</span>
+            {% elif r.stato.esito %}<span class="testo-tenue">{{ r.stato.esito }}</span>{% endif %}</td>
+        <td>{% if r.azione %}
+          <form method="post" action="/admin/riferimenti/{{ r.azione }}" onsubmit="return confirm('Aggiorno {{ r.nome }}? Ci vuole qualche minuto, in background.');">
+            <button type="submit" class="btn-primario"{% if r.stato.in_corso %} disabled{% endif %}>Aggiorna</button></form>
+        {% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="nota-metodologica" style="margin-top:8px">Ricarica la pagina per vedere lo stato dell'aggiornamento.</p>
+</div>
+{% endblock %}

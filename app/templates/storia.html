@@ -215,4 +215,22 @@
       il valore di una lettura già estratta; la regola resta com'è.</li>
   </ul>
 </div>
+<div class="panel storia-voce">
+  <div class="data">27/09/2026</div>
+  <h2>Calcolo più veloce, pagina Prese immediata, aggiornamento dei dati di riferimento</h2>
+  <ul>
+    <li><strong>Calcolo dei volumi più veloce</strong>: Voghera da 11,6 s a 4,3 s. Stesse regole: verificato che tutte le
+      tabelle del calcolo restino identiche.</li>
+    <li><strong>Pagina Prese immediata</strong>: l'analisi delle prese di un comune resta in memoria e su disco finché i dati
+      non cambiano (Voghera da circa 4 s a 0,1 s).</li>
+    <li><strong>Controllo dei numeri</strong> (<code>scripts/controllo_numeri.py</code>): fotografia di Import_WMS, prese e
+      coordinate di tutti i comuni, da confrontare dopo ogni modifica al codice per accorgersi subito se un numero
+      cambia senza volerlo.</li>
+    <li><strong>Amministrazione → Dati di riferimento</strong>: data dell'ultimo aggiornamento di civici ANNCSU, vie
+      OpenStreetMap e confini ISTAT, pulsante per aggiornare ANNCSU e OSM in background, avviso se ANNCSU ha più di un
+      mese.</li>
+    <li>Codice del tab Prese diviso in moduli più piccoli (geometria, coordinate, invii a Neta), senza cambiare niente
+      per chi usa l'app.</li>
+  </ul>
+</div>
 {% endblock %}

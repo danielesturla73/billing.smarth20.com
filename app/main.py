@@ -26,7 +26,9 @@ cambia la logica. La persistenza (SQLite) e' in database.py.
 """
 from __future__ import annotations
 
+import io
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -42,7 +44,7 @@ from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, auth, cache_disco, consolidamento, database, motore_calcolo, prese, stradario
+from app import accessi, anncsu, auth, cache_disco, consolidamento, database, motore_calcolo, prese, stradario, vie_osm
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -642,6 +644,91 @@ def pagina_consolidamento(request: Request):
     """Anni consolidati (copia fissa di Import_WMS) e, per gli admin, il
     pulsante per consolidare un anno (Daniele, 26/09/2026)."""
     return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request))
+
+
+# Aggiornamento dei dati di riferimento esterni dalla pagina Amministrazione
+# (Daniele, 27/09/2026: ANNCSU cambia ogni mese). Un aggiornamento alla
+# volta per tipo, in un thread; i risultati dei controlli si ricalcolano da
+# soli perche' la data dei file entra nella versione dei dati (prese).
+STATO_RIFERIMENTI: dict[str, dict] = {"anncsu": {}, "osm": {}}
+
+
+def _aggiorna_riferimento(tipo: str, utente: str, ip: str) -> None:
+    import contextlib
+    stato = STATO_RIFERIMENTI[tipo]
+    stato.update(in_corso=True, inizio=time.strftime("%d/%m %H:%M"), esito="")
+    uscita = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(uscita):
+            if tipo == "anncsu":
+                from scripts import aggiorna_anncsu
+                aggiorna_anncsu.main()
+            else:
+                from scripts import scarica_vie_osm
+                scarica_vie_osm.main([])
+        ultima = [r for r in uscita.getvalue().splitlines() if r.strip()][-1:] or ["fatto"]
+        stato["esito"] = f"ultimo aggiornamento riuscito ({time.strftime('%d/%m %H:%M')}): {ultima[0]}"
+        auth.registra(utente, f"aggiorna_{tipo}", f"completato: {ultima[0]}", ip)
+    except Exception as exc:  # l'errore si mostra in pagina, i file vecchi restano
+        stato["esito"] = f"aggiornamento NON riuscito ({time.strftime('%d/%m %H:%M')}): {exc}"
+        auth.registra(utente, f"aggiorna_{tipo}", f"errore: {exc}", ip)
+    finally:
+        stato["in_corso"] = False
+
+
+def _info_riferimenti() -> list[dict]:
+    from datetime import date as _date
+    righe = []
+    oggi = _date.today()
+
+    def vecchio(d):
+        try:
+            return (oggi - _date.fromisoformat(d)).days > 35
+        except (TypeError, ValueError):
+            return False
+
+    p = anncsu.PERCORSO_ANNCSU
+    data, contenuto = "", "file assente"
+    if p.exists():
+        testa = p.open(encoding="utf-8").readline()
+        m = re.search(r"(\d{4})(\d{2})(\d{2})\.zip", testa)
+        data = f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else ""
+        d = anncsu._dati()
+        con = d.groupby("COMUNE")["LAT"].apply(lambda s: s.notna().mean() >= 0.5)
+        contenuto = f"{len(d):,} civici di {d['COMUNE'].nunique()} comuni; posizionati in {int(con.sum())}".replace(",", ".")
+    righe.append({"nome": "Civici ANNCSU", "fonte": "Agenzia delle Entrate e ISTAT, CC-BY 4.0", "data": data,
+                  "vecchio": vecchio(data), "contenuto": contenuto, "azione": "anncsu", "stato": STATO_RIFERIMENTI["anncsu"]})
+    p = vie_osm.PERCORSO_VIE_OSM
+    data, contenuto = "", "file assente"
+    if p.exists():
+        g = json.loads(p.read_text(encoding="utf-8"))
+        data = g.get("scaricato_il", "")
+        contenuto = f"{len(g['features']):,} tratti di strada di {len({f['properties']['comune'] for f in g['features']})} comuni".replace(",", ".")
+    righe.append({"nome": "Vie OpenStreetMap", "fonte": "(c) OpenStreetMap contributors, ODbL", "data": data,
+                  "vecchio": False, "contenuto": contenuto, "azione": "osm", "stato": STATO_RIFERIMENTI["osm"]})
+    righe.append({"nome": "Confini dei comuni", "fonte": "ISTAT, unità amministrative a fini statistici", "data": "2025-01-01",
+                  "vecchio": False, "contenuto": "aggiornamento annuale, a mano (vedi Storia)", "azione": "", "stato": {}})
+    return righe
+
+
+@app.get("/admin/riferimenti")
+def admin_riferimenti(request: Request, msg: str = ""):
+    """Date e aggiornamento dei dati di riferimento esterni (solo admin)."""
+    return templates.TemplateResponse(request, "riferimenti.html", {
+        "request": request, "pagina_attiva": "admin", "comuni_disponibili": _comuni_disponibili(),
+        "comune_selezionato": None, "riferimenti": _info_riferimenti(), "msg": msg,
+    })
+
+
+@app.post("/admin/riferimenti/{tipo}")
+def admin_aggiorna_riferimento(request: Request, tipo: str):
+    if tipo not in STATO_RIFERIMENTI:
+        raise HTTPException(status_code=404, detail="Dato di riferimento sconosciuto.")
+    if not STATO_RIFERIMENTI[tipo].get("in_corso"):
+        auth.registra(request.state.utente["username"], f"aggiorna_{tipo}", "avviato", accessi.ip_client(request))
+        threading.Thread(target=_aggiorna_riferimento, args=(tipo, request.state.utente["username"], accessi.ip_client(request)),
+                         daemon=True).start()
+    return RedirectResponse("/admin/riferimenti?msg=Aggiornamento+avviato+in+background", status_code=303)
 
 
 @app.post("/admin/consolida")
