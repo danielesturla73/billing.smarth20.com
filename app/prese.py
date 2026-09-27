@@ -592,7 +592,31 @@ def _coordinate_valide(lat: pd.Series, lon: pd.Series) -> pd.Series:
     return lat.between(*LAT_VALIDA) & lon.between(*LON_VALIDA)
 
 
+_CACHE_PRESE: dict = {"versione": None, "dati": {}}
+_LOCK_PRESE = threading.Lock()
+
+
 def prese_comune(comune: str) -> pd.DataFrame:
+    """Come _prese_comune, in memoria e su disco finche' i dati non cambiano
+    (27/09/2026: si rifaceva a ogni richiesta, e piu' volte per richiesta;
+    Voghera ~2,5 s ogni volta). Restituisce una copia."""
+    versione = _versione_dati()
+    with _LOCK_PRESE:
+        if _CACHE_PRESE["versione"] != versione:
+            _CACHE_PRESE.update(versione=versione, dati={})
+        if comune in _CACHE_PRESE["dati"]:
+            return _CACHE_PRESE["dati"][comune].copy()
+    p = cache_disco.carica(f"prese_{comune}", (comune, versione))
+    if p is None:
+        p = _prese_comune(comune)
+        cache_disco.salva(f"prese_{comune}", (comune, versione), p)
+    with _LOCK_PRESE:
+        if _CACHE_PRESE["versione"] == versione:
+            _CACHE_PRESE["dati"][comune] = p
+    return p.copy()
+
+
+def _prese_comune(comune: str) -> pd.DataFrame:
     """Una riga per presa del comune (i servizi senza presa vera restano una
     riga ciascuno), escluse quelle con tutti i servizi cessati e gia'
     fatturati. Colonne: CHIAVE, DP, INDIRIZZO, CAP, SERVIZI (testo), N_SERVIZI,

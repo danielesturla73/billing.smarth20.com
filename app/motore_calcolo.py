@@ -48,6 +48,7 @@ import re
 from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -464,7 +465,10 @@ def classifica_distretto(df: pd.DataFrame, mappa_distretti: dict | None = None) 
             return "valido"
         return "anomalia"
 
-    df["CATEGORIA_DISTRETTO"] = df["DISTRETTO"].apply(categoria)
+    # La categoria dipende solo dal codice: si calcola una volta per codice
+    # distinto (poche decine) invece che per riga (27/09/2026).
+    per_codice = {v: categoria(v) for v in df["DISTRETTO"].unique()}
+    df["CATEGORIA_DISTRETTO"] = df["DISTRETTO"].map(per_codice)
 
     def motivo(row):
         if row["CATEGORIA_DISTRETTO"] != "anomalia":
@@ -483,7 +487,8 @@ def classifica_distretto(df: pd.DataFrame, mappa_distretti: dict | None = None) 
             )
         return f"Distretto '{row['DISTRETTO']}' non appartiene al comune di questa estrazione (prefisso atteso '{prefisso}')"
 
-    df["MOTIVO_SEGNALAZIONE"] = df.apply(motivo, axis=1)
+    motivi = {v: motivo({"CATEGORIA_DISTRETTO": per_codice[v], "DISTRETTO": v}) for v in per_codice}
+    df["MOTIVO_SEGNALAZIONE"] = df["DISTRETTO"].map(motivi) if len(df) else pd.Series(dtype=object)
     return df
 
 
@@ -907,25 +912,23 @@ def prorata_mensile_metodo_b(periodi: pd.DataFrame) -> pd.DataFrame:
     """Come prorata_mensile, ma a partire dai periodi del Metodo B
     (calcola_periodi_metodo_b) invece che dalle letture grezze.
     """
-    righe = []
+    # Stesse righe e stesso ordine di prima, costruite per colonne invece
+    # che con un dizionario per riga (27/09/2026, piu' veloce).
+    copiate = ["CODICE_SERVIZIO", "LOCALITA", "DISTRETTO", "CATEGORIA_DISTRETTO", "PRODOTTO_CODICE"]
+    colonne: dict[str, list] = {c: [] for c in copiate + ["MESE", "GIORNI_NEL_MESE", "VOLUME_MESE_M3", "FILE_ORIGINE", "ORIGINE"]}
     for row in periodi.itertuples(index=False):
         ripartizione = _ripartisci_su_mesi(row.DATA_FINE, int(row.GIORNI))
         totale_giorni = sum(g for _, g in ripartizione)
         for mese, giorni in ripartizione:
             quota = row.VOLUME_M3 * (giorni / totale_giorni) if totale_giorni else 0
-            righe.append({
-                "CODICE_SERVIZIO": row.CODICE_SERVIZIO,
-                "LOCALITA": row.LOCALITA,
-                "DISTRETTO": row.DISTRETTO,
-                "CATEGORIA_DISTRETTO": row.CATEGORIA_DISTRETTO,
-                "PRODOTTO_CODICE": row.PRODOTTO_CODICE,
-                "MESE": mese,
-                "GIORNI_NEL_MESE": giorni,
-                "VOLUME_MESE_M3": quota,
-                "FILE_ORIGINE": row.FILE_ORIGINE,
-                "ORIGINE": row.ORIGINE,
-            })
-    return pd.DataFrame(righe)
+            for c in copiate:
+                colonne[c].append(getattr(row, c))
+            colonne["MESE"].append(mese)
+            colonne["GIORNI_NEL_MESE"].append(giorni)
+            colonne["VOLUME_MESE_M3"].append(quota)
+            colonne["FILE_ORIGINE"].append(row.FILE_ORIGINE)
+            colonne["ORIGINE"].append(row.ORIGINE)
+    return pd.DataFrame(colonne) if colonne["MESE"] else pd.DataFrame()
 
 
 def flag_mesi_provvisori(df_prorata_b: pd.DataFrame) -> pd.DataFrame:
@@ -1149,6 +1152,13 @@ def aggrega_utenza_mese(
     return agg[colonne]
 
 
+@lru_cache(maxsize=None)
+def _periodo_mese(anno: int, mese_num: int) -> pd.Period:
+    """pd.Period del mese, creato una volta sola e riusato (27/09/2026:
+    costruirlo a ogni periodo era quasi tutto il costo della ripartizione)."""
+    return pd.Period(year=anno, month=mese_num, freq="M")
+
+
 def _ripartisci_su_mesi(data_fine: pd.Timestamp, giorni: int) -> list[tuple[pd.Period, int]]:
     """Dato il giorno finale di una lettura e il numero di giorni coperti,
     restituisce la lista (mese, n_giorni_in_quel_mese) che ripartisce il
@@ -1164,7 +1174,7 @@ def _ripartisci_su_mesi(data_fine: pd.Timestamp, giorni: int) -> list[tuple[pd.P
     """
     fine = data_fine.date()
     if giorni <= 0:
-        return [(pd.Period(year=fine.year, month=fine.month, freq="M"), 1)]
+        return [(_periodo_mese(fine.year, fine.month), 1)]
 
     inizio = fine - timedelta(days=giorni)
     # Il periodo e' (inizio, fine]: il giorno inizio stesso appartiene
@@ -1180,7 +1190,7 @@ def _ripartisci_su_mesi(data_fine: pd.Timestamp, giorni: int) -> list[tuple[pd.P
         ripartizione[chiave] = ripartizione.get(chiave, 0) + giorni_in_mese
         cursore = fine_blocco + timedelta(days=1)
 
-    return [(pd.Period(year=anno, month=mese_num, freq="M"), g) for (anno, mese_num), g in ripartizione.items()]
+    return [(_periodo_mese(anno, mese_num), g) for (anno, mese_num), g in ripartizione.items()]
 
 
 def _distretto_per_statistiche(categoria_distretto: str, distretto) -> str:
@@ -1801,20 +1811,23 @@ def trova_utenze_scomparse(file_in_ordine: list[pd.DataFrame]) -> pd.DataFrame:
     utenze_gia_viste = set()
     for df in file_in_ordine[:-1]:
         nome_file = df["FILE_ORIGINE"].iloc[0]
-        for _, riga in (
-            _ordina_priorita_stessa_data(df).groupby("CODICE_SERVIZIO").tail(1).iterrows()
-        ):
-            uid = riga["CODICE_SERVIZIO"]
-            if uid in utenze_ultimo_file or uid in utenze_gia_viste:
+        # Prima si tolgono le utenze ancora presenti o gia' viste, poi si
+        # scorrono solo quelle rimaste (27/09/2026: prima si scorrevano
+        # tutte, riga per riga). Stesso ordine di prima.
+        ultime = _ordina_priorita_stessa_data(df).groupby("CODICE_SERVIZIO").tail(1)
+        ultime = ultime[~ultime["CODICE_SERVIZIO"].isin(utenze_ultimo_file | utenze_gia_viste)]
+        for uid, indirizzo, stato_grezzo, data in zip(ultime["CODICE_SERVIZIO"], ultime["INDIRIZZO_UBICAZIONE"],
+                                                      ultime["STATO_SERVIZIO"], ultime["DATA_LETTURA"]):
+            if uid in utenze_gia_viste:
                 continue
             utenze_gia_viste.add(uid)
-            stato = str(riga["STATO_SERVIZIO"])
+            stato = str(stato_grezzo)
             atteso = any(chiave in stato.upper() for chiave in STATI_CHIUSURA_ATTESI)
             righe.append({
                 "Codice Servizio": uid,
-                "Indirizzo": riga["INDIRIZZO_UBICAZIONE"],
+                "Indirizzo": indirizzo,
                 "Ultimo Stato Servizio": stato,
-                "Ultima Data Lettura": riga["DATA_LETTURA"],
+                "Ultima Data Lettura": data,
                 "Ultimo File in cui Compare": nome_file,
                 "Da Verificare": "No (contratto chiuso)" if atteso else "Sì (era ancora attiva)",
             })

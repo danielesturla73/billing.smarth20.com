@@ -11,3 +11,4 @@ input/*.xlsx
 *.egg-info/
 .venv*/
 archivio/cache/
+archivio/controlli/
