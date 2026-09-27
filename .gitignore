@@ -12,3 +12,4 @@ input/*.xlsx
 .venv*/
 archivio/cache/
 archivio/controlli/
+archivio/vecchi/

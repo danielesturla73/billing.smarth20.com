@@ -21,7 +21,9 @@ import pandas as pd
 
 from app import database, motore_calcolo
 
-ARCHIVIO_DIR = Path("archivio")
+# I CSV storici sono stati spostati in archivio/vecchi/ il 27/09/2026 (non piu'
+# usati dall'app, che legge solo archivio/archivio.db).
+ARCHIVIO_DIR = Path("archivio") / "vecchi"
 
 
 def migra() -> None:

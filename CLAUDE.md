@@ -33,7 +33,7 @@ esporta_excel(r, 'output/test.xlsx')
 "
 ```
 
-`archivio/`, `input/`, and `output/` are gitignored and dockerignored (real customer data) but are bind-mounted as Docker volumes in `docker-compose.yml` so they persist across container rebuilds. `input/*.xlsx` are raw Neta H2O extracts (not committed); `archivio/*.csv` is the persistent historical store built incrementally by `aggiorna_archivio()`.
+`archivio/`, `input/`, and `output/` are gitignored and dockerignored (real customer data) but are bind-mounted as Docker volumes in `docker-compose.yml` so they persist across container rebuilds. `input/*.xlsx` are raw Neta H2O extracts (not committed); `archivio/archivio.db` (SQLite) is the persistent historical store and also holds users, audit log, prese confirmations, Neta sends and consolidated years. `archivio/cache/` holds disk-cached results (safe to delete), `archivio/controlli/` the `scripts/controllo_numeri.py` snapshot, `archivio/vecchi/` the pre-SQLite per-comune CSVs (no longer used).
 
 ## Architecture
 
