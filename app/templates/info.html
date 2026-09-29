@@ -59,9 +59,34 @@
     <li>Non esiste più un "Metodo A" (somma dei consumi dichiarati nel file): contava due volte le stime già
       conguagliate da una lettura reale successiva — rimosso su richiesta esplicita di Daniele, non verrà
       reintrodotto nemmeno come confronto/diagnostica.</li>
-    <li>Non invia mai automaticamente i dati a WMS SmartH2O: il caricamento in <code>district_billed</code>
-      resta un'azione manuale, con conferma umana, finché la logica di calcolo non sarà validata del tutto
-      da Neta H2O.</li>
+    <li>Non invia mai automaticamente i dati a WMS SmartH2O: l'invio a <code>district_billed</code> si fa dalla scheda
+      <a href="/pagine/invio-wms">Invio WMS</a>, con anteprima e conferma di una persona, finché la logica di calcolo non
+      sarà validata del tutto da Neta H2O (vedi sotto, "Invio a WMS SmartH2O").</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Invio a WMS SmartH2O</h2>
+  <p>Dalla scheda <a href="/pagine/invio-wms">Invio WMS</a> (editor) i volumi per distretto e mese vanno nella tabella
+    <code>district_billed</code> di WMS SmartH2O, che li confronta con l'immesso per le perdite.</p>
+  <ul>
+    <li><strong>Prima l'anteprima</strong>, che non scrive niente: righe nuove, aggiornate (con il valore che c'era in WMS),
+      invariate, scartate (distretto che WMS non conosce) e da cancellare. Poi <strong>Invia</strong>.</li>
+    <li><strong>Ogni volta tutti i mesi</strong>: WMS aggiorna solo quelli cambiati. Così i mesi provvisori e quelli toccati
+      dalle conferme del tab Prese si correggono da soli al primo invio.</li>
+    <li><strong>Mesi esclusi</strong>: il trimestre di apertura dell'archivio di ogni comune (volumi parziali, manca il
+      consumo prima della prima lettura, non si correggono mai) e i mesi incompleti, di solito l'ultimo, le cui letture
+      non sono ancora arrivate (volume sotto il 70% dei mesi prima). L'anteprima li elenca comune per comune. Le righe di
+      questi mesi già in WMS, arrivate da questa app, si cancellano all'invio; quelle caricate a mano in WMS mai.</li>
+    <li><strong>Provvisorio</strong>: più del 2% del volume del mese viene da stime non ancora chiuse da una lettura reale.
+      In WMS il mese è segnato, e la nota riporta i m³ stimati.</li>
+    <li><strong>Distretti con utenze in più comuni</strong> (secondo l'elenco distretti: DBRN01 e DBRN03 anche a Stradella,
+      DSTR09 anche a Broni): il volume inviato è sempre la somma di tutti i comuni, anche se ne scegli uno solo.</li>
+    <li><strong>Anni consolidati</strong>: partono con la copia fissa.</li>
+    <li>Se tra anteprima e invio cambia qualcosa (nuova estrazione, conferme), l'invio si ferma e chiede di rifare
+      l'anteprima. Ogni invio resta nell'elenco della scheda e nel registro azioni.</li>
+    <li>In WMS i numeri si vedono nella scheda <strong>Fatturato</strong> e nel <strong>Bilancio</strong>; il bilancio per
+      comune si aggiorna dopo il ricalcolo della sua cache (Manutenzione).</li>
   </ul>
 </div>
 
@@ -181,7 +206,23 @@
     <li>Le conferme <strong>non</strong> cambiano il file delle coordinate da verificare, che dipende solo dalle coordinate
       di Neta e dalle fonti esterne.</li>
     <li>I mesi degli <strong>anni consolidati</strong> non cambiano mai, qualunque cosa succeda.</li>
+    <li><strong>WMS SmartH2O</strong> riceve i numeri ricalcolati solo quando premi <strong>Invia</strong> nella scheda
+      Invio WMS: dopo una serie di conferme, fai un invio perché anche WMS abbia il passato corretto.</li>
   </ul>
+
+  <h3>Il controllo prese a ogni caricamento</h3>
+  <p>Quando carichi un'estrazione, l'app confronta presa per presa il distretto scritto da Neta con quello che abbiamo noi
+    e dice, sotto il caricamento, quante prese sono diverse, con l'elenco in Excel:</p>
+  <ul>
+    <li><strong>Confermate non recepite</strong>: le hai confermate, ma Neta ha ancora un altro distretto. Scendono man mano
+      che Neta sistema il gestionale.</li>
+    <li><strong>"Mantieni" cambiate</strong>: avevi detto "mantieni attuale", ma Neta ha cambiato distretto. Da guardare.</li>
+    <li><strong>Cambiate da Neta</strong>: prese mai confermate a cui Neta ha cambiato distretto rispetto all'estrazione prima.</li>
+    <li><strong>Nuove</strong>: prese mai viste. <strong>Recepite</strong>: Neta ha messo il distretto confermato.</li>
+  </ul>
+  <p>È ridondante con il tab Prese, ma è un controllo: a tendere va a zero, a parte le prese nuove. Lo storico dei controlli
+    è nella pagina Carica. Non si fa al primo caricamento di un comune né per un'estrazione più vecchia di quelle già
+    caricate, e non cambia i calcoli.</p>
 
   <h3>Il file distretti per Neta</h3>
   <p>Contiene solo le prese confermate e non ancora sistemate da Neta, già validate da chi le ha confermate. Le colonne

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 "Analisi Consumi da Fatturazione" (formerly "Fatturazione Utenze") — a water-consumption analysis service for Daniele. The purpose is NOT billing: it is the water balance and leak reduction. It reads quarterly meter-reading extracts from the Neta H2O CRM (one Excel file per comune/municipality) and computes the billed/consumed volume per water district (`distretto`) per month, which eventually feeds the `district_billed` table of a separate, already-live app called **WMS SmartH2O**. WMS holds the inflow (immesso, daily/monthly) and night minimum flows, and does the top-down comparison inflow vs. billed: a monthly trend, consolidated once a year. Estimated (provisional) months are acceptable for the trend, as long as they are flagged and later upserted (see below). Names like `district_billed`, `Volume Fatturato (m3)` and `Import_WMS` stay unchanged (WMS format).
 
-The two apps are deliberately separate (see `project_docs/riepilogo-progetto-wms-smarth2o.md`, §4.7): no shared database, no shared container. The web app (FastAPI + Jinja2 pages, SQLite archive, upload, per-comune results cache, login with viewer/editor/admin roles and an audit log) sits on top of the calculation engine; the main open work is the one-click push to WMS (see below and `README_DOCKER.md`).
+The two apps are deliberately separate (see `project_docs/riepilogo-progetto-wms-smarth2o.md`, §4.7): no shared database, no shared container. The web app (FastAPI + Jinja2 pages, SQLite archive, upload, per-comune results cache, login with viewer/editor/admin roles and an audit log) sits on top of the calculation engine; the one-click push to WMS exists since 29/09/2026 (see below and `README_DOCKER.md`).
 
 Read `project_docs/specifiche-applicativo-fatturazione-utenze.md` and `project_docs/riepilogo-progetto-wms-smarth2o.md` before making calculation-logic or architecture decisions — they record decisions already made with Daniele (including ones that reversed earlier approaches). Don't re-derive or re-litigate something already settled there.
 
@@ -65,12 +65,13 @@ esporta_excel(r, 'output/test.xlsx')
 
 Separate login from WMS (`app/auth.py`, `app/accessi.py`; details in `README_DOCKER.md`, section "Accessi"). Roles viewer < editor < admin, enforced server-side by a default-deny middleware — any new route needs login, and any non-GET needs editor, without extra code; `/admin/*` needs admin. When adding an action that changes data, log it with `auth.registra(utente, azione, dettagli, ip)` (audit trail requested by Daniele: who did what). Never ask for, print, or store passwords or `SETUP_CODE` in chat/git; the `.env` stays out of git. Keep port 8010 bound to 127.0.0.1.
 
-## Integration with WMS SmartH2O (not yet built)
+## Integration with WMS SmartH2O (built 29/09/2026)
 
-- The two containers share a Docker bridge network, `rete-interna-idrico` (external, created once on the VPS, not by this repo's compose file). WMS SmartH2O is reachable at `http://wms-smarth20:80` (port 80 internally, *not* 8080 — that's only the host-published port for Caddy).
-- Calls between the two services will be authenticated with a shared secret, `INTERNAL_API_TOKEN` (see `.env.example`); the target URL is `WMS_API_URL`.
-- The push to `district_billed` is meant to stay a manual "one-click" action (a button, human-confirmed) rather than a scheduler, until the calculation logic is fully confirmed by Neta H2O (see project summary §4.9) — don't build this as an automatic cron/scheduler unless that decision changes.
-- Provisional values matter: a quarter can be billed with an estimate when a real reading is still missing (flagged via `flag_mesi_provvisori`/"Contiene Stime Provvisorie"), and gets silently corrected on the next recalculation once the real reading arrives. Any future loading endpoint into `district_billed` needs to support **upsert**, not insert-only, because of this.
+- The two containers share a Docker bridge network, `rete-interna-idrico` (external, created once on the VPS; both compose files now declare it). WMS SmartH2O is reachable at `http://wms-smarth20:80` (port 80 internally, *not* 8080 — that's only the host-published port for Caddy).
+- `app/invio_wms.py` + the "Invio WMS" page push Import_WMS to `POST /api/v1/billed/import` on WMS (code in `/opt/wms/wms-smarth20/wms-api/app/api/v1/billed.py`), authenticated with the shared secret `INTERNAL_API_TOKEN` (header `X-Internal-Token`, same value in both `.env`). Preview (`prova=true`) writes nothing; send is one transaction with **upsert** on (month, district).
+- Rules decided with Daniele: every send carries all useful months (Prese confirmations are retroactive, so the past gets corrected); the archive's opening quarter and incomplete months (`main._mesi_incompleti`) are never sent, and WMS deletes its own "Analisi Consumi" rows for them (never manual uploads); `provvisorio` only above 2% estimated volume; a district with customers in several comuni (per `distretti_comuni.csv`) is always summed over all of them.
+- It stays a manual, human-confirmed action rather than a scheduler until the calculation logic is fully confirmed by Neta H2O (see project summary §4.9) — don't make it automatic unless that decision changes.
+- Test containers must mount `project_docs/` (bind-mounted in production, excluded from the image), otherwise cross-comune districts silently disappear and numbers differ from production.
 
 ## Conventions
 

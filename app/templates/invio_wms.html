@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block titolo %}Invio a WMS — Analisi Consumi da Fatturazione{% endblock %}
+{% block contenuto %}
+<h1>Invio a WMS SmartH2O</h1>
+<p class="nota-metodologica">
+  Manda a WMS SmartH2O (tabella <code>district_billed</code>) i volumi per distretto e mese di Import_WMS, per i comuni scelti.
+  Si mandano <strong>tutti i mesi</strong> ogni volta: WMS aggiorna quelli che sono cambiati e lascia com'erano gli altri, così i
+  mesi <strong>provvisori</strong> (con stime non ancora chiuse da una lettura reale) si correggono da soli al primo invio dopo
+  la nuova estrazione. Gli anni consolidati partono con la copia fissa. <strong>Non si mandano</strong> il trimestre di apertura
+  dell'archivio di ogni comune (volumi parziali: manca il consumo prima della prima lettura) né i mesi incompleti (di solito
+  l'ultimo, le cui letture non sono ancora arrivate): le righe di questi mesi già in WMS, arrivate da questa app, vengono
+  cancellate all'invio (mai quelle caricate a mano in WMS). Prima l'<strong>anteprima</strong> (non scrive niente), poi <strong>Invia</strong>.
+</p>
+
+{% if not configurato %}<div class="avviso">WMS_API_URL o INTERNAL_API_TOKEN mancanti nel .env del container: l'invio non è attivo.</div>{% endif %}
+{% if errore %}<div class="avviso">{{ errore }}</div>{% endif %}
+{% if esito %}
+<div class="esito-ok">
+  <strong>Invio {{ esito.id }} fatto.</strong> {{ esito.conteggi.creato }} righe create, {{ esito.conteggi.aggiornato }} aggiornate,
+  {{ esito.conteggi.invariato }} invariate, {{ esito.conteggi.scartato }} scartate, {{ esito.conteggi.cancellato or 0 }} cancellate.
+  In WMS il bilancio dei comuni in cache si aggiorna al prossimo ricalcolo.
+</div>
+{% endif %}
+
+{% if request.state.utente.ruolo != 'viewer' %}
+<div class="panel">
+  <h2>Comuni da inviare</h2>
+  <form method="post" action="/pagine/invio-wms/anteprima"
+        onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Anteprima in corso…'">
+    <p style="margin-top:0">
+      <a href="#" onclick="document.querySelectorAll('.scelta-comune').forEach(c=>c.checked=true);return false">tutti</a> ·
+      <a href="#" onclick="document.querySelectorAll('.scelta-comune').forEach(c=>c.checked=false);return false">nessuno</a>
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:12px">
+      {% for c in comuni_disponibili %}
+      <label style="white-space:nowrap"><input type="checkbox" class="scelta-comune" name="comuni" value="{{ c }}"
+        {% if c in comuni_scelti %}checked{% endif %}> {{ c }}</label>
+      {% endfor %}
+    </div>
+    <button type="submit" class="btn-primario" {% if not configurato %}disabled{% endif %}>Anteprima</button>
+  </form>
+</div>
+{% else %}
+<div class="avviso">Il tuo ruolo (viewer) permette solo di consultare: per l'invio a WMS serve il ruolo editor.</div>
+{% endif %}
+
+{% if anteprima %}
+{% set c = anteprima.conteggi %}
+<div class="panel">
+  <h2>Anteprima (niente è ancora stato scritto in WMS)</h2>
+  <p>
+    {{ anteprima.n_righe }} righe mese/distretto ({{ anteprima.n_provvisorie }} provvisorie):
+    <strong>{{ c.creato }}</strong> nuove, <strong>{{ c.aggiornato }}</strong> aggiornate,
+    {{ c.invariato }} invariate, <strong>{{ c.scartato }}</strong> scartate, <strong>{{ c.cancellato or 0 }}</strong> da cancellare.
+  </p>
+  {% if anteprima.mesi_esclusi %}
+  <p class="nota-metodologica" style="margin-top:0">Mesi non inviati (apertura dell'archivio o incompleti):
+    {% for comune, mesi in anteprima.mesi_esclusi.items() %}{{ comune }} {{ mesi|join(', ') }}{% if not loop.last %} · {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% if c.creato or c.aggiornato or c.cancellato %}
+  <form method="post" action="/pagine/invio-wms/invia"
+        onsubmit="if(!confirm('Scrivere in WMS SmartH2O {{ c.creato }} righe nuove, {{ c.aggiornato }} aggiornate e cancellarne {{ c.cancellato or 0 }}?'))return false;this.querySelector('button').disabled=true;this.querySelector('button').textContent='Invio in corso…'">
+    {% for comune in comuni_scelti %}<input type="hidden" name="comuni" value="{{ comune }}">{% endfor %}
+    <input type="hidden" name="firma" value="{{ anteprima.firma }}">
+    <button type="submit" class="btn-primario">Invia a WMS</button>
+  </form>
+  {% else %}
+  <div class="esito-ok">WMS ha già questi numeri: niente da inviare.</div>
+  {% endif %}
+
+  {% if anteprima.scarti %}
+  <h3>Scartate da WMS</h3>
+  <table>
+    <thead><tr><th>Distretto</th><th>Motivo</th><th class="num">Mesi</th><th class="num">m³</th></tr></thead>
+    <tbody>{% for s in anteprima.scarti %}
+      <tr><td>{{ s.codice_distretto }}</td><td>{{ s.motivo }}</td><td class="num">{{ s.mesi }}</td><td class="num">{{ "{:.0f}".format(s.volume) }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% endif %}
+
+  {% if anteprima.cambiano %}
+  <details class="avvisi-collassabili" {% if anteprima.cambiano|length <= 30 %}open{% endif %}>
+    <summary>Righe che cambiano in WMS ({{ anteprima.cambiano|length }})</summary>
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Distretto</th><th>Mese</th><th>Azione</th><th class="num">m³ in WMS</th><th class="num">m³ nuovi</th>
+        <th class="num">Differenza</th><th>Provvisorio</th><th>Fonte in WMS</th></tr></thead>
+      <tbody>{% for r in anteprima.cambiano %}
+        <tr><td>{{ r.codice_distretto }}</td><td>{{ r.mese }}</td><td>{{ r.azione }}</td>
+          <td class="num">{{ "{:.0f}".format(r.volume_prima) if r.volume_prima is not none else '—' }}</td>
+          <td class="num">{{ "{:.0f}".format(r.volume) }}</td>
+          <td class="num">{{ "{:+.0f}".format(r.differenza) if r.volume_prima is not none else '' }}</td>
+          <td>{% if r.provvisorio %}<span class="badge stimato">provvisorio</span>{% endif %}</td>
+          <td class="testo-tenue">{{ r.fonte_prima or '' }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+    </div>
+  </details>
+  {% endif %}
+
+  {% if anteprima.non_piu %}
+  <details class="avvisi-collassabili">
+    <summary>Da cancellare in WMS ({{ anteprima.non_piu|length }}): mesi arrivati da questa app che non si mandano più</summary>
+    <table>
+      <thead><tr><th>Distretto</th><th>Mese</th><th class="num">m³ in WMS</th><th>Provvisorio</th></tr></thead>
+      <tbody>{% for r in anteprima.non_piu %}
+        <tr><td>{{ r.codice_distretto }}</td><td>{{ r.mese }}</td><td class="num">{{ "{:.0f}".format(r.volume or 0) }}</td>
+          <td>{% if r.provvisorio %}sì{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Invii fatti (orari UTC)</h2>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>N.</th><th>Quando</th><th>Chi</th><th>Comuni</th><th class="num">Righe</th><th class="num">Create</th>
+      <th class="num">Aggiornate</th><th class="num">Invariate</th><th class="num">Scartate</th><th class="num">Cancellate</th></tr></thead>
+    <tbody>
+    {% for i in invii %}
+    <tr><td>{{ i.id }}</td><td style="white-space:nowrap">{{ i.quando }}</td><td>{{ i.utente }}</td><td>{{ i.comuni }}</td>
+      <td class="num">{{ i.n_righe }}</td><td class="num">{{ i.conteggi.creato }}</td><td class="num">{{ i.conteggi.aggiornato }}</td>
+      <td class="num">{{ i.conteggi.invariato }}</td><td class="num">{{ i.conteggi.scartato }}</td>
+      <td class="num">{{ i.conteggi.cancellato or 0 }}</td></tr>
+    {% else %}
+    <tr><td colspan="10">Nessun invio ancora.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

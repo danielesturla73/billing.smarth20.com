@@ -44,7 +44,7 @@ from fastapi.templating import Jinja2Templates
 
 import pandas as pd
 
-from app import accessi, anncsu, auth, cache_disco, consolidamento, database, motore_calcolo, prese, stradario, vie_osm
+from app import accessi, anncsu, auth, cache_disco, consolidamento, database, invio_wms, motore_calcolo, prese, prese_confronto, stradario, vie_osm
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -184,6 +184,13 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
             continue
 
         comune = motore_calcolo.comune_dominante(df) or "SCONOSCIUTO"
+        # Controllo prese (Daniele, 29/09/2026): distretto di Neta contro il
+        # nostro, prima che l'anagrafica venga aggiornata con questo file.
+        try:
+            controllo = await run_in_threadpool(
+                prese_confronto.controlla_e_salva, df, comune, percorso_salvato.name, request.state.utente["username"])
+        except Exception as exc:  # il controllo non deve mai bloccare il caricamento
+            controllo = {"saltato": f"errore nel controllo: {exc}"}
         # Anagrafica delle prese (coordinate/distretto dell'ultima estrazione,
         # vedi app/prese.py): dal file intero, prima della deduplica letture.
         await run_in_threadpool(prese.aggiorna_anagrafica, df, percorso_salvato.name)
@@ -193,6 +200,7 @@ async def _carica_estrazioni(request: Request, files: list[UploadFile]) -> dict:
             "comune": comune,
             "righe_lette": len(df),
             "errore": None,
+            "controllo_prese": controllo,
         })
         file_per_comune.setdefault(comune, []).append(percorso_salvato)
 
@@ -262,6 +270,8 @@ def _contesto_carica(request: Request, esito: dict | None = None) -> dict:
         "comune_selezionato": None,
         "stato_archivio": _stato_archivio(),
         "ultimi_caricamenti": auth.leggi_registro(azione="upload_estrazione", limite=10),
+        "controlli_prese": prese_confronto.elenco_controlli(),
+        "stati_prese": prese_confronto.STATI,
         "esito": esito,
     }
 
@@ -278,6 +288,21 @@ def pagina_carica(request: Request):
 async def pagina_carica_invio(request: Request, files: list[UploadFile] = File(...)):
     esito = await _carica_estrazioni(request, files)
     return templates.TemplateResponse(request, "carica.html", _contesto_carica(request, esito))
+
+
+@app.get("/prese/controllo/{id_controllo}")
+def prese_controllo_esporta(request: Request, id_controllo: int):
+    """Excel delle prese di un controllo fatto al caricamento (vedi
+    app/prese_confronto.py)."""
+    try:
+        nome, contenuto = prese_confronto.esporta_excel(id_controllo)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 def _tabella_json(df: pd.DataFrame) -> list[dict]:
@@ -644,6 +669,70 @@ def pagina_consolidamento(request: Request):
     """Anni consolidati (copia fissa di Import_WMS) e, per gli admin, il
     pulsante per consolidare un anno (Daniele, 26/09/2026)."""
     return templates.TemplateResponse(request, "consolidamento.html", _contesto_consolidamento(request))
+
+
+def _contesto_invio_wms(request: Request, comuni_scelti: list[str] | None = None, errore: str = "",
+                        anteprima: dict | None = None, esito: dict | None = None) -> dict:
+    tutti = _comuni_disponibili()
+    return {
+        "request": request, "pagina_attiva": "invio_wms", "comuni_disponibili": tutti, "comune_selezionato": None,
+        "comuni_scelti": comuni_scelti if comuni_scelti is not None else tutti,
+        "configurato": invio_wms.configurato(), "invii": invio_wms.elenco_invii(),
+        "errore": errore, "anteprima": anteprima, "esito": esito,
+    }
+
+
+def _dati_invio(comuni: list[str]) -> dict:
+    return invio_wms.prepara(list(_risultati_per_comune(None)), comuni, _mesi_incompleti)
+
+
+@app.get("/pagine/invio-wms")
+def pagina_invio_wms(request: Request):
+    """Invio dei volumi a WMS SmartH2O: anteprima, poi Invia (editor).
+    Vedi app/invio_wms.py."""
+    return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request))
+
+
+@app.post("/pagine/invio-wms/anteprima")
+async def invio_wms_anteprima(request: Request):
+    form = await request.form()
+    comuni = form.getlist("comuni")
+    if not comuni:
+        return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, [], "Scegli almeno un comune."))
+    try:
+        dati = await run_in_threadpool(_dati_invio, comuni)
+        esito = await run_in_threadpool(invio_wms.chiama_wms, dati, True, request.state.utente["username"])
+    except ValueError as exc:
+        return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, comuni, str(exc)))
+    anteprima = {**invio_wms.riassunto_anteprima(esito), "conteggi": esito["conteggi"], "firma": dati["firma"],
+                 "mesi_esclusi": dati["mesi_esclusi"],
+                 "n_righe": len(dati["righe"]), "n_provvisorie": sum(r["provvisorio"] for r in dati["righe"])}
+    return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, comuni, anteprima=anteprima))
+
+
+@app.post("/pagine/invio-wms/invia")
+async def invio_wms_invia(request: Request):
+    form = await request.form()
+    comuni = form.getlist("comuni")
+    utente = request.state.utente["username"]
+    try:
+        dati = await run_in_threadpool(_dati_invio, comuni)
+        if not comuni or dati["firma"] != form.get("firma"):
+            raise ValueError("I numeri sono cambiati dall'anteprima (nuova estrazione, conferme o consolidamento): "
+                             "rifai l'anteprima prima di inviare.")
+        esito = await run_in_threadpool(invio_wms.chiama_wms, dati, False, utente)
+    except ValueError as exc:
+        auth.registra(utente, "invio_wms_errore", f"{', '.join(comuni)}: {exc}", accessi.ip_client(request))
+        return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, comuni, str(exc)))
+    id_invio = await run_in_threadpool(invio_wms.registra_invio, dati, esito, utente)
+    c = esito["conteggi"]
+    auth.registra(utente, "invio_wms",
+                  f"invio {id_invio} — {', '.join(dati['comuni'])}: {len(dati['righe'])} righe, {c['creato']} create, "
+                  f"{c['aggiornato']} aggiornate, {c['invariato']} invariate, {c['scartato']} scartate, "
+                  f"{c.get('cancellato', 0)} cancellate",
+                  accessi.ip_client(request))
+    return templates.TemplateResponse(request, "invio_wms.html",
+                                      _contesto_invio_wms(request, comuni, esito={"id": id_invio, "conteggi": c}))
 
 
 # Aggiornamento dei dati di riferimento esterni dalla pagina Amministrazione

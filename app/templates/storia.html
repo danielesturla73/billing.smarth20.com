@@ -233,4 +233,42 @@
       per chi usa l'app.</li>
   </ul>
 </div>
+<div class="panel storia-voce">
+  <div class="data">29/09/2026</div>
+  <h2>Controllo prese a ogni caricamento</h2>
+  <p>A ogni estrazione caricata, presa per presa, il distretto scritto da Neta viene confrontato con quello che abbiamo
+    noi (la conferma del tab Prese, oppure il distretto dell'estrazione precedente). L'esito compare subito sotto il
+    caricamento, con l'elenco in Excel, e resta nella tabella <em>Controllo prese ai caricamenti</em> della pagina Carica,
+    per vedere l'andamento: a tendere va a zero, a parte le prese nuove. Non cambia i calcoli.</p>
+  <ul>
+    <li><strong>Confermate non recepite</strong>: confermate da noi, Neta ha ancora un altro distretto.</li>
+    <li><strong>"Mantieni" cambiate</strong>, <strong>cambiate da Neta</strong>, <strong>nuove</strong>, e le
+      <strong>recepite</strong> (Neta ha messo il distretto confermato).</li>
+    <li>Prima prova, sull'ultima estrazione di Belgioioso: le 9 prese confermate non ancora corrette da Neta.</li>
+  </ul>
+</div>
+<div class="panel storia-voce">
+  <div class="data">29/09/2026</div>
+  <h2>Invio a WMS SmartH2O</h2>
+  <p>Nuova scheda <a href="/pagine/invio-wms">Invio WMS</a>: i volumi per distretto e mese arrivano in WMS SmartH2O
+    (tabella <code>district_billed</code>) con un clic, dopo un'anteprima che non scrive niente. Resta un'azione manuale,
+    niente invii automatici.</p>
+  <ul>
+    <li><strong>Si mandano tutti i mesi ogni volta</strong>: le conferme del tab Prese valgono anche sul passato, quindi al
+      primo invio dopo una conferma WMS riceve corretti anche i mesi già inviati (tranne gli anni consolidati).</li>
+    <li><strong>Non si mandano</strong> il trimestre di apertura dell'archivio di ogni comune né i mesi incompleti (di solito
+      l'ultimo): Belgioioso era arrivato con luglio/agosto 2025 e giugno 2026 bassissimi. Le righe di questi mesi già in
+      WMS, arrivate da questa app, si cancellano all'invio; quelle caricate a mano in WMS mai.</li>
+    <li><strong>Provvisorio</strong>: un mese è segnato provvisorio in WMS se più del 2% del suo volume viene da stime non
+      ancora chiuse da una lettura reale; la nota riporta comunque i m³ stimati.</li>
+    <li><strong>Distretti con utenze in più comuni</strong> (DBRN01 e DBRN03 anche a Stradella, DSTR09 anche a Broni):
+      il volume per WMS è la somma dei comuni, anche se ne scegli uno solo.</li>
+    <li>Anteprima e invio devono avere gli stessi numeri: se nel frattempo cambia qualcosa (estrazione, conferme),
+      l'invio si ferma e chiede di rifare l'anteprima. Ogni invio finisce nel registro azioni.</li>
+  </ul>
+  <p>In WMS SmartH2O, lo stesso giorno: gli upload e i ricalcoli richiedono il login da editor anche lato server (prima
+    bastava conoscere l'indirizzo), nuova scheda <strong>Fatturato</strong> con i grafici mese per mese per comune e per
+    distretto, e il <strong>Bilancio manuale</strong> usa la media dei mesi inviati da qui (se un distretto non ne ha, il
+    consumo annuo 2025 diviso 12), con una nota che dice quale.</p>
+</div>
 {% endblock %}

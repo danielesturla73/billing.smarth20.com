@@ -55,6 +55,8 @@
        class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
     <a href="/pagine/consolidamento"
        class="{% if pagina_attiva == 'consolidamento' %}attivo{% endif %}">Consolidamento</a>
+    <a href="/pagine/invio-wms"
+       class="{% if pagina_attiva == 'invio_wms' %}attivo{% endif %}">Invio WMS</a>
     {% if request.state.utente.ruolo != 'viewer' %}
     <a href="/pagine/carica"
        class="{% if pagina_attiva == 'carica' %}attivo{% endif %}">Carica</a>
