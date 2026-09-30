@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import collections
 import math
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -432,7 +433,8 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     # DP tutti NO DISTRETTO, uno a 117 m da un confine riceveva la proposta
     # DBRN05). Vale solo per le frazioni, non per le vie: il DP e' in una frazione
     # con almeno MIN_DP_FRAZIONE altri DP, di cui almeno QUOTA_FRAZIONE_ND NO DISTRETTO in Neta.
-    frazione = pd.Series([v if v.startswith(("FRAZIONE ", "FRAZ. ", "FRAZ ")) else "" for v in vie_norm], index=p.index)
+    # Anche localita' e cascine (LOC.CASA RAMATI, LOCALITA' X, CASCINA X, C.NA X: Daniele, 30/09/2026).
+    frazione = pd.Series([v if _RE_FRAZIONE.match(v) else "" for v in vie_norm], index=p.index)
     nodma = (p["MOTIVO"] == "NODMA")
     n_frazione = frazione.map(frazione[frazione != ""].value_counts()).fillna(0)
     n_nodma = frazione.map(nodma[frazione != ""].groupby(frazione[frazione != ""]).sum()).fillna(0)
@@ -539,6 +541,8 @@ _CACHE_OSM_FUORI: dict = {}
 
 # Fonte "resto della frazione": almeno tanti altri DP nella frazione, e almeno
 # questa quota NO DISTRETTO in Neta.
+_RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
+
 MIN_DP_FRAZIONE = 5
 QUOTA_FRAZIONE_ND = 0.9
 
