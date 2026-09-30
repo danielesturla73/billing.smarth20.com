@@ -388,6 +388,24 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   // d'accordo (civico ANNCSU, stradario, via OSM, posizione).
   const sicura = r => !r.CONFERMATO && r.PROPOSTA && r.CONCORDI;
 
+  // Colpo d'occhio sull'elenco (Daniele, 30/09/2026): barra verde = sicura
+  // (confermabile in blocco), barra ambra = da verificare a mano, con il
+  // perche' nel titolo dell'etichetta. Le gia' confermate non hanno barra.
+  // Le non sicure si distinguono per quante fonti concordano con la proposta
+  // (✓ su totale, contati da FONTI): maggioranza (es. 2 su 3), una sola fonte,
+  // fonti discordi (i ✗ sono almeno quanti i ✓) o nessuna proposta.
+  function statoRiga(r) {
+    if (r.CONFERMATO) return null;
+    const ok = ((r.FONTI || '').match(/✓/g) || []).length;
+    const no = ((r.FONTI || '').match(/✗/g) || []).length;
+    const tot = ok + no;
+    if (sicura(r)) return { classe: 'sicura', badge: 'real', testo: `✓ sicura · ${tot} su ${tot}`, perche: 'Almeno due fonti e tutte concordano: confermabile in blocco.' };
+    if (!r.PROPOSTA) return { classe: 'discordi', badge: 'discordi', testo: 'nessuna proposta', perche: 'Nessuna fonte propone un distretto: da assegnare a mano.' };
+    if (no && ok > no) return { classe: 'maggioranza', badge: 'stimato', testo: `${ok} su ${tot} fonti`, perche: 'La maggioranza delle fonti concorda, ma almeno una dissente (✗): da verificare.' };
+    if (no) return { classe: 'discordi', badge: 'discordi', testo: `discordi · ${ok} su ${tot}`, perche: 'Le fonti non concordano: controlla i ✗ nelle fonti.' };
+    return { classe: 'una-fonte', badge: 'nodata', testo: '1 fonte', perche: 'Una sola fonte, nessun riscontro: non confermabile in blocco.' };
+  }
+
   function testoProposta(r) {
     const fonti = r.FONTI ? `<div class="testo-tenue">Fonti: ${esc(r.FONTI)}</div>` : '';
     if (r.PROPOSTA_DA && r.PROPOSTA_DA !== 'posizione') {
@@ -427,9 +445,11 @@ document.getElementById('genera-stradario').addEventListener('click', async func
            <button type="button" class="btn-primario azione-conferma">Conferma</button>
            ${mantenibile(r) ? `<button type="button" class="btn-link azione-mantieni" title="Il distretto attuale è giusto: il DP è validato e non va a Neta">Mantieni attuale (${esc(r.DISTRETTO)})</button>` : ''}
          </div>` : '';
-    return `<div class="riga-presa${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
+    const st = statoRiga(r);
+    return `<div class="riga-presa${st ? ' ' + st.classe : ''}${r.CHIAVE === selezionata ? ' selezionata' : ''}" data-chiave="${esc(r.CHIAVE)}">
       <div class="riga-testa">
         <span class="mono">${r.DP ? esc(r.DP) : 'senza DP'}</span>
+        ${st ? `<span class="badge ${st.badge}" title="${esc(st.perche)}">${st.testo}</span>` : ''}
         <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || (r.ORIGINE === 'manuale' || r.ORIGINE === 'zona' ? ORIGINE_TESTO[r.ORIGINE] : 'sistemata'))}</span>
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>
@@ -457,7 +477,12 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     elenco.innerHTML = righe.map(htmlRiga).join('') || '<p class="testo-tenue">Nessun punto di erogazione con questi filtri.</p>';
     marcatori.forEach((m, k) => { if (chiavi.has(k)) stratoPunti.addLayer(m); else stratoPunti.removeLayer(m); });
     RIGHE.forEach(aggiornaMarcatore);
-    document.getElementById('conteggio').textContent = `${fmt(righe.length)} punti di erogazione nell'elenco`;
+    const perStato = { sicura: 0, maggioranza: 0, 'una-fonte': 0, discordi: 0 };
+    righe.forEach(r => { const st = statoRiga(r); if (st) perStato[st.classe]++; });
+    const etichetta = (classe, badge, testo) => perStato[classe] ? ` <span class="badge ${badge}">${fmt(perStato[classe])} ${testo}</span>` : '';
+    const dettaglio = etichetta('sicura', 'real', 'sicure') + etichetta('maggioranza', 'stimato', 'maggioranza delle fonti') +
+      etichetta('una-fonte', 'nodata', 'con 1 fonte') + etichetta('discordi', 'discordi', 'discordi o senza proposta');
+    document.getElementById('conteggio').innerHTML = `${fmt(righe.length)} punti di erogazione nell'elenco` + (dettaglio ? ' ·' + dettaglio : '');
     const bottone = document.getElementById('conferma-proposte');
     if (bottone) {
       const n = righe.filter(sicura).length;

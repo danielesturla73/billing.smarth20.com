@@ -401,6 +401,16 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     p["CIVICO_ESISTE"] = civ["CIVICO_ESISTE"].to_numpy()
     p["CIV_METODO"] = civ["CIV_METODO"].astype(str).to_numpy()
     p["D_CIVICO"] = _distretti_sicuri(p["CIV_LAT"].to_numpy(dtype=float), p["CIV_LON"].to_numpy(dtype=float))
+    # Civico ANNCSU esistente e fuori da ogni distretto (oltre TOLLERANZA_BORDO_M
+    # dal bordo di un eventuale distretto vicino): l'indirizzo e' fuori
+    # rete (Daniele, 30/09/2026, Via Novarini 19 a Broni: la coordinata Neta,
+    # 330 m piu' in la', cadeva in DBRN03 e veniva proposto DBRN03). Usato in
+    # prese_da_assegnare come fonte dissenziente, non per cancellare la proposta.
+    cv = np.nonzero(~(np.isnan(p["CIV_LAT"].to_numpy(dtype=float)) | np.isnan(p["CIV_LON"].to_numpy(dtype=float))))[0]
+    p["CIVICO_FUORI"] = False
+    if len(cv):
+        fuori = np.array(_dentro_confini(p["CIV_LAT"].to_numpy(dtype=float)[cv], p["CIV_LON"].to_numpy(dtype=float)[cv])) == ""
+        p.iloc[cv[fuori], p.columns.get_loc("CIVICO_FUORI")] = True
     osm_via = _distretto_osm_unico(comune, [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]])
     p["D_OSM"] = [osm_via.get(stradario.normalizza_indirizzo(i)[0], "") for i in p["INDIRIZZO"]]
     p["D_POSIZIONE"] = [""] * len(p)
@@ -548,8 +558,13 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     p["DISTANZA_M"] = [None if dv else d for dv, (_, d) in zip(p["DISTRETTO_VIA"], proposte)]
     p["PROPOSTA_DA"] = [f or ("posizione" if c else "") for f, (c, _) in zip(p["FONTE_INDIRIZZO"], proposte)]
     fonti, concordi = [], []
-    for r, (c, d) in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM"]].to_dict("records"), proposte):
-        elenco = [("civico ANNCSU", r["D_CIVICO"]), ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
+    for r, (c, d) in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI"]].to_dict("records"), proposte):
+        # Civico ANNCSU esistente ma fuori da ogni distretto: fonte che dissente
+        # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
+        # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
+        # resta visibile ma non e' mai CONCORDI: la decide l'utente.
+        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("fuori" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
+                  ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
                   ("posizione", c if d is None else "")]
         elenco = [(n, x) for n, x in elenco if x]
         fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] else '✗'}" for n, x in elenco))

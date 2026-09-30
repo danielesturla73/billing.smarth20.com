@@ -464,6 +464,11 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
 .elenco-prese { max-height: 560px; overflow-y: auto; border-top: 1px solid var(--border); }
 .riga-presa { padding: 10px 8px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; display: grid; gap: 2px; }
 .riga-presa:hover { background: var(--surface-2); }
+.riga-presa.sicura { border-left: 4px solid var(--green); }
+.riga-presa.maggioranza { border-left: 4px solid var(--amber); }
+.riga-presa.una-fonte { border-left: 4px solid var(--border-strong); }
+.riga-presa.discordi { border-left: 4px solid var(--danger, #B3261E); }
+.badge.discordi { background: rgba(179, 38, 30, 0.12); color: var(--danger, #B3261E); }
 .riga-presa.selezionata { background: var(--teal-light); box-shadow: inset 3px 0 0 var(--teal); }
 .riga-testa { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .riga-testa .mono { font-weight: 600; }
