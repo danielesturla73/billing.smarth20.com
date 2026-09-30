@@ -20,71 +20,113 @@
 {% endif %}
 
 {% if not comune %}
+{# Senza comune scelto (Daniele, 30/09/2026): due blocchi. 1 = associazione al distretto (la parte importante, come lista di lavoro
+   ordinata); 2 = coordinate da verificare (meno importante, chiuso di default). #}
+{% set t = totali %}
 <div class="panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-    <h2 style="margin:0">Punti di erogazione da sistemare, per comune</h2>
-    <span><a href="/prese/esporta">Scarica le conferme di tutti i comuni (Excel)</a> ·
-      <a href="/prese/coordinate">Coordinate da verificare, tutti i comuni (Excel)</a> ·
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+    <h2 style="margin:0">1 · Punti di erogazione da verificare: associazione al distretto (DMA)</h2>
+    <span><a href="/prese/esporta">Conferme di tutti i comuni (Excel)</a> ·
       <a href="/prese/gis" title="Non va a Neta: DP già confermati in un distretto ma fuori dal suo confine, per chi gestisce il GIS">Fuori confine per il GIS (Excel)</a> ·
       <a href="/prese/gis.geojson" title="Gli stessi punti da aprire in QGIS con i poligoni dei distretti">(GeoJSON)</a> ·
       <a href="/prese/vie" title="Vie e frazioni di Neta che non si abbinano a OpenStreetMap o ad ANNCSU, o sono ambigue (la prima volta ci vuole circa un minuto)">Vie da verificare (Excel)</a></span>
   </div>
-  <div class="table-scroll" style="max-height:none">
+  {% if riepilogo %}
+  <div class="kpi-grid">
+    <div class="kpi"><div class="etichetta">Da confermare</div><div class="valore">{{ t.aperti }}</div></div>
+    <div class="kpi"><div class="etichetta">di cui sicure (in blocco)</div><div class="valore" style="color:var(--green)">{{ t.sicure }}</div></div>
+    <div class="kpi"><div class="etichetta">Confermati</div><div class="valore">{{ t.confermati }}</div></div>
+    <div class="kpi"><div class="etichetta">Fatto</div><div class="valore">{{ t.percentuale }}%</div></div>
+    <div class="kpi"><div class="etichetta">Comuni completi</div><div class="valore">{{ t.comuni_completi }} / {{ t.comuni }}</div></div>
+  </div>
+  <div class="table-scroll" style="max-height:none;margin-top:12px">
     <table>
-      <thead><tr><th>Comune</th><th class="num">NO DISTRETTO</th><th class="num">*</th><th class="num">Altro comune</th>
-        <th class="num">Diverso dalla posizione</th><th class="num">Distretto soppresso</th><th class="num">Via di altro distretto</th><th class="num">Confermate</th><th class="num">Già recepite da Neta</th><th class="num">Validate</th><th class="num">Coordinate da verificare</th></tr></thead>
+      <thead><tr><th>Comune</th><th class="num">Da confermare</th><th class="num" title="Proposte con almeno due fonti d'accordo: si confermano in blocco dalla pagina del comune">di cui sicure</th>
+        <th class="num">da decidere</th><th class="num">Confermati</th><th style="min-width:150px">Fatto</th></tr></thead>
       <tbody>
         {% for r in riepilogo %}
-        <tr>
+        {% set motivi = [] %}
+        {% for nome, n in (('NO DISTRETTO', r.NODMA), ('* (non indicato)', r.ND), ('Altro comune', r.ALTRO), ('Diverso dalla posizione', r.POSIZIONE), ('Distretto soppresso', r.FUSO), ('Via di altro distretto', r.VIA)) %}{% if n %}{% set _ = motivi.append(nome ~ ' ' ~ n) %}{% endif %}{% endfor %}
+        <tr{% if r.aperti == 0 %} class="testo-tenue"{% endif %}>
           <td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td>
-          <td class="num">{{ r.NODMA }}</td><td class="num">{{ r.ND }}</td><td class="num">{{ r.ALTRO }}</td>
-          <td class="num">{{ r.POSIZIONE }}</td><td class="num">{{ r.FUSO }}</td><td class="num">{{ r.VIA }}</td><td class="num">{{ r.confermate }}</td><td class="num">{{ r.recepite }}</td><td class="num">{{ r.validate }}</td><td class="num">{{ r.coordinate }}</td>
+          {% if r.aperti == 0 %}
+          <td class="num" colspan="3"><span class="badge real">✓ completo</span></td>
+          {% else %}
+          <td class="num" title="{{ motivi | join(' · ') }}"><strong>{{ r.aperti }}</strong></td>
+          <td class="num" style="color:var(--green)">{{ r.sicure }}</td>
+          <td class="num">{{ r.da_decidere }}</td>
+          {% endif %}
+          <td class="num">{{ r.confermati_tot }}</td>
+          <td><div class="barra" title="{{ r.confermati_tot }} confermati su {{ r.confermati_tot + r.aperti }}"><span style="width:{{ r.percentuale }}%"></span></div>
+            <span class="testo-tenue" style="font-size:11px">{{ r.percentuale }}%</span></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <p class="nota-metodologica" style="margin-top:8px">
+    Ordinati dal comune con più da confermare. <strong>Sicure</strong> = proposte con almeno due fonti d'accordo, confermabili in blocco dalla pagina del comune;
+    <strong>da decidere</strong> = le altre. <strong>Fatto</strong> = confermati (con "mantieni attuale") sul totale dei DP segnalati. Passa il mouse su "Da confermare" per i motivi.
+  </p>
+  {% else %}
+  <p class="testo-tenue">Conteggi in preparazione: si calcolano dopo ogni caricamento o riavvio, ci vuole qualche minuto. Ricarica la pagina.</p>
+  {% endif %}
+  {% set invii_d = invii | selectattr('tipo', 'equalto', 'distretti') | list %}
+  <details style="margin-top:12px">
+    <summary><strong>Invii a Neta dei distretti confermati</strong> <span class="testo-tenue">({{ invii_d | length }} registrati)</span></summary>
+    <p class="nota-metodologica" style="margin:8px 0">
+      "Registra invio" scarica il file da mandare a Neta con i soli punti di erogazione ancora aperti (tutti i comuni; dalla pagina di un comune solo quel comune) e se lo segna: data, chi, quali DP.
+      <em>Aperti</em> sono quelli che Neta non ha ancora sistemato (distretto non recepito): da sollecitare. Dopo un invio ricarica la pagina.
+    </p>
+    {% if puo_modificare %}
+    <form method="post" action="/prese/invio" style="margin-bottom:8px"><input type="hidden" name="tipo" value="distretti">
+      <button class="btn-primario" type="submit">Registra invio: distretti confermati</button></form>
+    {% endif %}
+    {% if invii_d %}
+    <div class="table-scroll" style="max-height:none"><table>
+      <thead><tr><th>Quando</th><th>Chi</th><th>Comuni</th><th class="num">DP inviati</th><th class="num">Risolte da Neta</th><th class="num">Ancora aperte</th></tr></thead>
+      <tbody>{% for i in invii_d %}<tr><td>{{ i.quando }}</td><td>{{ i.utente }}</td><td class="testo-tenue">{{ i.comuni }}</td>
+        <td class="num">{{ i.n_prese }}</td><td class="num">{{ i.risolte }}</td><td class="num">{{ i.aperte }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="testo-tenue">Nessun invio registrato.</p>{% endif %}
+  </details>
 </div>
 
 <div class="panel">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
-    <h2 style="margin:0">Invii a Neta</h2>
-    {% if puo_modificare %}
-    <span style="display:flex;gap:8px;flex-wrap:wrap">
-      <form method="post" action="/prese/invio"><input type="hidden" name="tipo" value="distretti">
-        <button class="btn-primario" type="submit">Registra invio: distretti confermati</button></form>
-      <form method="post" action="/prese/invio"><input type="hidden" name="tipo" value="coordinate">
-        <button class="btn-primario" type="submit">Registra invio: coordinate da verificare</button></form>
-    </span>
-    {% endif %}
-  </div>
-  <p class="nota-metodologica" style="margin-bottom:10px">
-    "Registra invio" scarica il file da mandare a Neta (tutti i comuni; dalla pagina di un comune solo quel comune)
-    con i soli punti di erogazione ancora aperti, e se lo segna: data, chi, quali DP. <em>Aperti</em> sono quelli che a oggi
-    Neta non ha ancora sistemato (distretto non recepito, coordinata ancora da verificare): da sollecitare.
-    Nel file la colonna "Già inviata" dice quante volte un DP era già stato mandato.
-    Gli Excel qui sopra servono solo a guardare, non registrano niente. Dopo un invio ricarica la pagina.
-  </p>
-  {% if invii %}
-  <div class="table-scroll" style="max-height:none">
-    <table>
-      <thead><tr><th>Quando</th><th>Chi</th><th>Cosa</th><th>Comuni</th><th class="num">DP inviati</th>
-        <th class="num">Risolte da Neta</th><th class="num">Ancora aperte</th></tr></thead>
+  <details>
+    <summary style="font-size:16px"><strong>2 · Coordinate da verificare</strong>
+      <span class="testo-tenue">— meno urgente · {{ t.coordinate }} DP in {{ t.comuni }} comuni, {{ t.coordinate_inviate }} già inviati a Neta (clicca per aprire)</span></summary>
+    <div style="display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin:8px 0">
+      <a href="/prese/coordinate">Coordinate da verificare, tutti i comuni (Excel)</a>
+    </div>
+    {% if riepilogo %}
+    <div class="table-scroll" style="max-height:none"><table>
+      <thead><tr><th>Comune</th><th class="num">Da verificare</th><th class="num">già inviati a Neta</th><th class="num">ancora da inviare</th></tr></thead>
       <tbody>
-        {% for i in invii %}
-        <tr>
-          <td>{{ i.quando }}</td><td>{{ i.utente }}</td>
-          <td>{{ 'Distretti confermati' if i.tipo == 'distretti' else 'Coordinate da verificare' }}</td>
-          <td class="testo-tenue">{{ i.comuni }}</td>
-          <td class="num">{{ i.n_prese }}</td><td class="num">{{ i.risolte }}</td><td class="num">{{ i.aperte }}</td>
-        </tr>
+        {% for r in riepilogo | sort(attribute='coordinate', reverse=True) %}
+        <tr><td><a href="/pagine/prese?comune={{ r.comune | urlencode }}">{{ r.comune }}</a></td><td class="num">{{ r.coordinate }}</td>
+          <td class="num">{{ r.coordinate_inviate }}</td><td class="num">{{ r.coordinate - r.coordinate_inviate }}</td></tr>
         {% endfor %}
       </tbody>
-    </table>
-  </div>
-  {% else %}
-  <p class="testo-tenue">Nessun invio registrato.</p>
-  {% endif %}
+    </table></div>
+    {% endif %}
+    {% set invii_c = invii | selectattr('tipo', 'equalto', 'coordinate') | list %}
+    <p class="nota-metodologica" style="margin:10px 0 8px">
+      Le coordinate di Neta sbagliate (fuori comune, lontane dalla via o dal civico, segnaposto, mancanti). L'app ne calcola una migliore dove può e la usa sulla mappa; a Neta vanno solo le proposte affidabili.
+      "Registra invio" scarica il file e lo segna nel registro.
+    </p>
+    {% if puo_modificare %}
+    <form method="post" action="/prese/invio" style="margin-bottom:8px"><input type="hidden" name="tipo" value="coordinate">
+      <button class="btn-primario" type="submit">Registra invio: coordinate da verificare</button></form>
+    {% endif %}
+    {% if invii_c %}
+    <div class="table-scroll" style="max-height:none"><table>
+      <thead><tr><th>Quando</th><th>Chi</th><th>Comuni</th><th class="num">DP inviati</th><th class="num">Risolte da Neta</th><th class="num">Ancora aperte</th></tr></thead>
+      <tbody>{% for i in invii_c %}<tr><td>{{ i.quando }}</td><td>{{ i.utente }}</td><td class="testo-tenue">{{ i.comuni }}</td>
+        <td class="num">{{ i.n_prese }}</td><td class="num">{{ i.risolte }}</td><td class="num">{{ i.aperte }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="testo-tenue">Nessun invio di coordinate registrato.</p>{% endif %}
+  </details>
 </div>
 {% else %}
 

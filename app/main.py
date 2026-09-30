@@ -1734,7 +1734,17 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
         "distanza_max": prese.DISTANZA_MAX_PROPOSTA_M,
     }
     if not comune:
-        contesto["riepilogo"] = [] if contesto["ricostruzione"]["in_corso"] else prese.riepilogo_comuni(comuni_disponibili)
+        riepilogo = [] if contesto["ricostruzione"]["in_corso"] else prese.riepilogo_comuni(comuni_disponibili)
+        # Lista di lavoro: prima i comuni con piu' da confermare, in fondo quelli finiti.
+        contesto["riepilogo"] = sorted(riepilogo, key=lambda r: (r["aperti"] == 0, -r["aperti"], r["comune"]))
+        contesto["totali"] = {
+            "aperti": sum(r["aperti"] for r in riepilogo), "sicure": sum(r["sicure"] for r in riepilogo),
+            "confermati": sum(r["confermati_tot"] for r in riepilogo),
+            "comuni_completi": sum(1 for r in riepilogo if r["aperti"] == 0), "comuni": len(riepilogo),
+            "coordinate": sum(r["coordinate"] for r in riepilogo), "coordinate_inviate": sum(r["coordinate_inviate"] for r in riepilogo),
+        }
+        t = contesto["totali"]
+        t["percentuale"] = round(100 * t["confermati"] / (t["confermati"] + t["aperti"])) if (t["confermati"] + t["aperti"]) else 100
         contesto["invii"] = prese.elenco_invii()
         contesto["puo_modificare"] = request.state.utente["ruolo"] in ("editor", "admin")
         return templates.TemplateResponse(request, "prese.html", contesto)

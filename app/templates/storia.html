@@ -451,6 +451,10 @@
       rigenerato dai dati attuali, prima su una copia e confrontato con quello vecchio; le 1.298 conferme sono risultate identiche prima e dopo (lo stradario cambia solo le proposte). Cambiano 14 comuni e solo 4 vie hanno un distretto diverso:
       Giussago Via F.lli Cairoli (da "a cavallo" a DGSG06, 52 DP), Gambolò Via Agricoltura - Fraz. Stradella (da DGM03 a "a cavallo", 19), Broni Via Priv. Marconi (da DBRN02 a DBRN01, 18), Mortara Via S. Albino (da DMR10 a DMR06, 3).
       Nel file cambia in tutte le righe anche la dicitura delle note ("da prese Neta" diventa "da punti di erogazione Neta"). Si torna indietro con un revert del commit.</li>
+    <li><strong>Pagina Punti di erogazione senza comune: due blocchi</strong> (la tabella a 11 colonne era illeggibile). Blocco 1, <em>associazione al distretto</em>: una lista di lavoro ordinata dal comune con più DP da
+      confermare, con <em>da confermare</em>, <em>di cui sicure</em> (confermabili in blocco), <em>da decidere</em>, <em>confermati</em> e una barra con la percentuale fatta; i comuni finiti in fondo, in grigio, con "✓ completo"; i motivi
+      (NO DISTRETTO, *, altro comune…) nel tooltip; in alto i totali. Blocco 2, <em>coordinate da verificare</em> (meno urgente), chiuso di default: da verificare, già inviati a Neta, ancora da inviare per comune. I due invii a Neta
+      (distretti e coordinate) e i loro registri stanno ciascuno nel proprio blocco. Il calcolo del riepilogo ora include le proposte (per contare le sicure): dopo un riavvio servono circa 75 secondi per tutti i comuni, poi è in cache.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la

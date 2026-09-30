@@ -853,14 +853,20 @@ def aggiorna_riepilogo_in_background(comuni: list[str]) -> None:
 def _calcola_riepilogo(comuni: list[str]) -> list[dict]:
     righe = []
     for comune in comuni:
-        p = prese_da_assegnare(comune, con_proposta=False)
+        # Con le proposte (Daniele, 30/09/2026): serve a dire quante delle aperte sono "sicure" (confermabili in blocco).
+        p = prese_da_assegnare(comune, con_proposta=True)
         if p.empty:
             righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0, "VIA": 0,
-                          "confermate": 0, "recepite": 0, "validate": 0, "coordinate": 0})
+                          "confermate": 0, "recepite": 0, "validate": 0, "coordinate": 0, "coordinate_inviate": 0,
+                          "aperti": 0, "sicure": 0, "da_decidere": 0, "confermati_tot": 0, "percentuale": 100})
             continue
         # Aperte = ancora da confermare (Daniele, 30/09/2026): le confermate
         # non recepite da Neta hanno ancora il motivo, ma contano in "confermate".
         aperte = p[(p["MOTIVO"] != "") & ~p["VALIDATA"] & p["CONFERMATO"].isna()]
+        sicure = int(((aperte["PROPOSTA"] != "") & aperte["CONCORDI"]).sum())
+        confermati_tot = int((p["CONFERMATO"].notna() | p["VALIDATA"]).sum())  # confermate + validate
+        coord_aperte = _aperte_in_memoria("coordinate", comune)
+        inviate = invii_per_presa(comune, "coordinate")
         righe.append({
             "comune": comune,
             "NODMA": int((aperte["MOTIVO"] == "NODMA").sum()),
@@ -872,7 +878,14 @@ def _calcola_riepilogo(comuni: list[str]) -> list[dict]:
             "confermate": int((p["CONFERMATO"].notna() & ~p["VALIDATA"]).sum()),
             "recepite": int((p["RECEPITO"] & ~p["VALIDATA"]).sum()),
             "validate": int(p["VALIDATA"].sum()),
-            "coordinate": len(_aperte_in_memoria("coordinate", comune)),
+            "coordinate": len(coord_aperte),
+            "coordinate_inviate": sum(1 for k in coord_aperte if inviate.get(k, (0, None))[0] > 0),
+            # Per la tabella "da verificare": cosa resta, quante sono confermabili in blocco, a che punto siamo.
+            "aperti": len(aperte),
+            "sicure": sicure,
+            "da_decidere": len(aperte) - sicure,
+            "confermati_tot": confermati_tot,
+            "percentuale": round(100 * confermati_tot / (confermati_tot + len(aperte))) if (confermati_tot + len(aperte)) else 100,
         })
     return righe
 

@@ -505,3 +505,7 @@ nav.tabs .sep { width: 1px; align-self: center; height: 18px; background: var(--
 .barra-zona { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .pannello-zona { margin-bottom: 10px; }
 .avviso-zona { color: var(--amber, #B9700B); font-weight: 600; margin: 8px 0 4px; }
+
+/* Barra di avanzamento (pagina Punti di erogazione, tabella dei comuni) */
+.barra { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; min-width: 110px; }
+.barra > span { display: block; height: 100%; background: var(--green); }
