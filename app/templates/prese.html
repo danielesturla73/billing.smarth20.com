@@ -569,8 +569,20 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   // Tracciato della via (OSM) e civico ANNCSU sulla mappa, per confrontarli
   // con la coordinata di Neta: la mappa si inquadra su via, civico e punto.
   const stratoVia = L.layerGroup().addTo(mappa);
+  // Se la via non si trova, un messaggio nella riga con il link a Google Maps (Daniele, 30/09/2026): non
+  // un alert e non un'apertura automatica, che il browser potrebbe bloccare.
+  const urlGoogleMaps = r => 'https://www.google.com/maps/search/?api=1&query=' +
+    encodeURIComponent(String(r.INDIRIZZO).trim() + ', ' + COMUNE + ', Italia');
+  function avvisoVia(bottone, r, testo) {
+    const riga = bottone.closest('.riga-presa');
+    if (!riga) return;
+    let el = riga.querySelector('.avviso-via');
+    if (!el) { el = document.createElement('div'); el.className = 'avviso-via testo-tenue'; bottone.parentElement.after(el); }
+    el.innerHTML = testo ? `${esc(testo)} <a href="${urlGoogleMaps(r)}" target="_blank" rel="noopener"><strong>Cerca su Google Maps ↗</strong></a>` : '';
+  }
   async function mostraVia(r, bottone) {
     stratoVia.clearLayers();
+    avvisoVia(bottone, r, '');
     const testo = bottone.textContent;
     bottone.disabled = true; bottone.textContent = 'carico…';
     try {
@@ -584,13 +596,13 @@ document.getElementById('genera-stradario').addEventListener('click', async func
           .bindTooltip(`Civico ${esc(v.civico.civico || '')} (ANNCSU)`, { permanent: true, direction: 'top' }).addTo(stratoVia);
         punti.push([v.civico.lat, v.civico.lon]);
       }
-      if (!v.tratti.length && !v.civico) alert(`Via non trovata in OpenStreetMap né tra i civici ANNCSU: ${r.INDIRIZZO}`);
+      if (!v.tratti.length && !v.civico) avvisoVia(bottone, r, 'Via non trovata in OpenStreetMap né tra i civici ANNCSU.');
       else {
-        if (!v.tratti.length) alert('Via non trovata in OpenStreetMap: mostro solo il civico ANNCSU.');
+        if (!v.tratti.length) avvisoVia(bottone, r, 'Via non trovata in OpenStreetMap: mostro solo il civico ANNCSU.');
         mappa.fitBounds(L.latLngBounds(punti), { padding: [40, 40], maxZoom: 18 });
       }
     } catch (err) {
-      alert('Non riesco a caricare la via: ' + err.message);
+      avvisoVia(bottone, r, 'Non riesco a caricare la via (' + err.message + ').');
     } finally {
       bottone.disabled = false; bottone.textContent = testo;
     }
