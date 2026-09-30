@@ -663,7 +663,11 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     # sistema alta/media, non l'approssimata). Sicura con almeno due fonti; si
     # conferma come "mantieni attuale" (il DP e' gia' NO DISTRETTO in Neta).
     if con_proposta:
-        for i in np.nonzero(((p["MOTIVO"] == "NODMA") & (p["PROPOSTA"] == "")).to_numpy())[0]:
+        # Anche i DP con motivo POSIZIONE (Neta ha un distretto ma la posizione e' fuori,
+        # oltre la tolleranza): Casa Bernini 29 a Broni, DBRN01 in Neta in una frazione
+        # di 27 DP tutti NO DISTRETTO (Daniele, 30/09/2026). Confermare vale uno
+        # spostamento da quel distretto a NO DISTRETTO.
+        for i in np.nonzero((p["MOTIVO"].isin(["NODMA", "POSIZIONE"]) & (p["PROPOSTA"] == "")).to_numpy())[0]:
             r = p.iloc[i]
             elenco = []
             if r["CIVICO_FUORI"]:
@@ -678,7 +682,9 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
             if not elenco:
                 continue
             nome = " + ".join(elenco)
-            p.at[p.index[i], "PROPOSTA"] = r["DISTRETTO"]
+            # NODMA: il valore che Neta ha gia' (la conferma e' "mantieni attuale");
+            # POSIZIONE: NO DISTRETTO, uno spostamento dal distretto di Neta.
+            p.at[p.index[i], "PROPOSTA"] = r["DISTRETTO"] if r["MOTIVO"] == "NODMA" else NO_DISTRETTO
             p.at[p.index[i], "PROPOSTA_DA"] = "posizione fuori da ogni distretto" if nome == "posizione" else nome
             p.at[p.index[i], "DISTANZA_M"] = None
             p.at[p.index[i], "FONTI"] = " · ".join(f"{n} NODMA ✓" for n in elenco)
