@@ -127,6 +127,18 @@ def assicura_tabelle(conn) -> None:
             VALORE TEXT, LAT REAL, LON REAL
         )""")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_invii_prese ON invii_neta_prese (LOCALITA, CHIAVE)")
+    # Coordinate "di sistema" (Daniele, 30/09/2026): quelle calcolate dall'app
+    # (civico ANNCSU, interpolazione, meta' via) che si usano al posto di
+    # quelle sbagliate di Neta finche' Neta non le corregge. Tabella derivata,
+    # ricalcolata a ogni estrazione (vedi prese_coordinate.salva_coordinate_sistema);
+    # le coordinate di Neta in anagrafica_servizi non si toccano mai.
+    # AFFIDABILITA: alta / media / approssimata (meta' via, conosco solo la via).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coordinate_sistema (
+            LOCALITA TEXT NOT NULL, CHIAVE TEXT NOT NULL, LAT REAL, LON REAL,
+            FONTE TEXT, AFFIDABILITA TEXT, PROBLEMA TEXT, LAT_NETA REAL, LON_NETA REAL, QUANDO TEXT,
+            PRIMARY KEY (LOCALITA, CHIAVE)
+        )""")
     conn.commit()
 
 
@@ -546,9 +558,29 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     p["ORIGINE"] = p["ORIGINE"].fillna("")
     p["NOTA"] = p["NOTA"].fillna("")
     p = p[(p["MOTIVO"] != "") | p["CONFERMATO"].notna()].reset_index(drop=True)
-    lat = p["LAT"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
-    lon = p["LON"].where(p["COORD_VALIDE"]).to_numpy(dtype=float)
+    # Coordinate di sistema (Daniele, 30/09/2026): quelle calcolate dall'app
+    # (vedi prese_coordinate.salva_coordinate_sistema) al posto di quelle
+    # sbagliate di Neta. LAT/LON restano quelle di Neta (le usano il file per
+    # Neta e i controlli); LAT_SIS/LON_SIS sono per mappa e proposta. Solo
+    # alta/media servono per la proposta del distretto: la "approssimata"
+    # (meta' via) e' solo indicativa.
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        sis = pd.read_sql_query(
+            "SELECT CHIAVE, LAT AS LAT_SIS, LON AS LON_SIS, FONTE AS FONTE_SIS, AFFIDABILITA AS AFF_SIS "
+            "FROM coordinate_sistema WHERE LOCALITA=?", conn, params=(comune.strip().upper(),))
+    p = p.merge(sis, on="CHIAVE", how="left")
+    p["AFF_SIS"] = p["AFF_SIS"].fillna("")
+    p["FONTE_SIS"] = p["FONTE_SIS"].fillna("")
+    p["COORD_SISTEMA"] = p["AFF_SIS"] != ""
+    usa_sis = p["AFF_SIS"].isin(["alta", "media"]).to_numpy()
+    approssimata = (p["AFF_SIS"] == "approssimata").to_numpy()  # coordinata di Neta certamente sbagliata: niente proposta dalla posizione
+    lat = np.where(usa_sis, p["LAT_SIS"], p["LAT"].where(p["COORD_VALIDE"] & ~approssimata)).astype(float)
+    lon = np.where(usa_sis, p["LON_SIS"], p["LON"].where(p["COORD_VALIDE"] & ~approssimata)).astype(float)
     proposte = proponi_distretti(lat, lon) if con_proposta else [("", None)] * len(p)
+    # Punto calcolato fuori da ogni distretto: niente "il piu' vicino", e' un
+    # punto stimato (Via Novarini 19 a Broni: il civico e' fuori rete).
+    proposte = [("", None) if u and d is not None else (c, d) for (c, d), u in zip(proposte, usa_sis)]
     # Prima l'indirizzo (civico ANNCSU, stradario, via OSM), poi la posizione
     # (Daniele, 25/09/2026). PROPOSTA_DA = la fonte della proposta; FONTI =
     # tutte le fonti disponibili con il loro distretto, ✓ se concordano con
@@ -556,16 +588,20 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     # proposte confermabili in blocco).
     p["PROPOSTA"] = [dv or c for dv, (c, _) in zip(p["DISTRETTO_VIA"], proposte)]
     p["DISTANZA_M"] = [None if dv else d for dv, (_, d) in zip(p["DISTRETTO_VIA"], proposte)]
-    p["PROPOSTA_DA"] = [f or ("posizione" if c else "") for f, (c, _) in zip(p["FONTE_INDIRIZZO"], proposte)]
+    # Con la coordinata di sistema la "posizione" non e' una fonte
+    # indipendente (nasce dal civico o dalla via): la proposta si dichiara
+    # "punto calcolato" e non conta in FONTI ne' in CONCORDI.
+    p["PROPOSTA_DA"] = [f or (("punto calcolato" if u else "posizione") if c else "")
+                        for f, (c, _), u in zip(p["FONTE_INDIRIZZO"], proposte, usa_sis)]
     fonti, concordi = [], []
-    for r, (c, d) in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI"]].to_dict("records"), proposte):
+    for r, (c, d), u in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI"]].to_dict("records"), proposte, usa_sis):
         # Civico ANNCSU esistente ma fuori da ogni distretto: fonte che dissente
         # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
         # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
         # resta visibile ma non e' mai CONCORDI: la decide l'utente.
         elenco = [("civico ANNCSU", r["D_CIVICO"] or ("fuori" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
                   ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
-                  ("posizione", c if d is None else "")]
+                  ("posizione", c if d is None and not u else "")]
         elenco = [(n, x) for n, x in elenco if x]
         fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] else '✗'}" for n, x in elenco))
         concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))

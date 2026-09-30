@@ -321,6 +321,18 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const ORIGINE_TESTO = { proposta: "proposta dell'app", manuale: 'spostato a mano', zona: 'spostato con una zona', mantieni: 'mantieni attuale' };
   const MOTIVO_TESTO = { NODMA: 'NO DISTRETTO', ND: '*', ALTRO: 'Altro comune', POSIZIONE: 'Diverso dalla posizione', FUSO: 'Distretto soppresso', VIA: 'Via di altro distretto' };
   const COLORE_MOTIVO = { NODMA: GRIGIO, ND: ROSSO, ALTRO: AMBRA, POSIZIONE: VIOLA, FUSO: BLU, VIA: ARANCIO };
+  // Coordinata di sistema (Daniele, 30/09/2026): dove l'app ha calcolato una
+  // coordinata migliore di quella di Neta (civico ANNCSU, interpolazione, meta'
+  // via) la mappa usa quella; la posizione di Neta resta in LAT_NETA/LON_NETA.
+  const AFF_COORD_TESTO = { alta: 'alta', media: 'media', approssimata: 'approssimata: conosco solo la via' };
+  RIGHE.forEach(r => {
+    r.LAT_NETA = r.LAT; r.LON_NETA = r.LON; r.NETA_VALIDA = r.COORD_VALIDE;
+    if (r.LAT_SIS != null && r.LON_SIS != null) { r.LAT = r.LAT_SIS; r.LON = r.LON_SIS; r.COORD_VALIDE = true; }
+  });
+  const testoCoordSistema = r => r.AFF_SIS
+    ? `Coordinata calcolata (${AFF_COORD_TESTO[r.AFF_SIS] || r.AFF_SIS}): ${r.FONTE_SIS}. Neta: ` +
+      (r.NETA_VALIDA ? `${Number(r.LAT_NETA).toFixed(6)}, ${Number(r.LON_NETA).toFixed(6)}` : 'coordinate non valide')
+    : '';
   const perChiave = new Map(RIGHE.map(r => [r.CHIAVE, r]));
   let selezionata = null;
 
@@ -346,6 +358,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
         `Attuale: ${esc(r.DISTRETTO)}` +
         (r.PROPOSTA ? ` · proposta <strong>${esc(r.PROPOSTA)}</strong> (${esc(r.PROPOSTA_DA || '')})` : '') +
         (r.FONTI ? `<br><span style="font-size:11px">${esc(r.FONTI)}</span>` : '') +
+        (r.AFF_SIS ? `<br><span style="font-size:11px">📍 ${esc(testoCoordSistema(r))}</span>` : '') +
         (r.CONFERMATO ? `<br>Confermato: <strong>${esc(r.CONFERMATO)}</strong>` : ''),
       { className: 'tooltip-distretto' });
     m.on('click', () => seleziona(r.CHIAVE, true));
@@ -380,7 +393,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       card('Via di altro distretto', conta('VIA')) +
       card('Confermate', RIGHE.filter(r => r.CONFERMATO && !r.VALIDATA).length) +
       card('Validate (distretto attuale giusto)', RIGHE.filter(r => r.VALIDATA).length) +
-      card('Senza coordinate valide', RIGHE.filter(r => !r.COORD_VALIDE).length);
+      card('Senza coordinate valide (Neta)', RIGHE.filter(r => !r.NETA_VALIDA).length);
   }
 
   // Da dove viene la proposta: prima l'indirizzo (stradario), poi la posizione.
@@ -453,6 +466,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       <div class="riga-testa">
         <span class="mono">${r.DP ? esc(r.DP) : 'senza DP'}</span>
         ${st ? `<span class="badge ${st.badge}" title="${esc(st.perche)}">${st.testo}</span>` : ''}
+        ${r.AFF_SIS ? `<span class="badge ${r.AFF_SIS === 'approssimata' ? 'stimato' : 'nodata'}" title="${esc(testoCoordSistema(r))}">📍 coord. calcolata · ${esc(r.AFF_SIS)}</span>` : ''}
         <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || (r.ORIGINE === 'manuale' || r.ORIGINE === 'zona' ? ORIGINE_TESTO[r.ORIGINE] : 'sistemata'))}</span>
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>

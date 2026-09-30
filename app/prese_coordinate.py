@@ -11,7 +11,7 @@ import threading
 import numpy as np
 import pandas as pd
 
-from app import cache_disco, motore_calcolo, stradario, vie_osm
+from app import cache_disco, database, motore_calcolo, stradario, vie_osm
 from app.prese_geo import (
     TOLLERANZA_BORDO_M,
     TOLLERANZA_CONFINE_COMUNE_M,
@@ -28,6 +28,7 @@ from app.prese import (
     LAT_VALIDA,
     LON_VALIDA,
     _versione_dati,
+    assicura_tabelle,
     prese_comune,
 )
 
@@ -301,6 +302,42 @@ def distretti_del_comune(comune: str) -> set[str]:
         or comune in [c.strip().upper() for c in str(r.comuni_associabili).split(";")]
     }
 
+# Problemi in cui la coordinata di Neta e' con certezza sbagliata: solo per
+# questi, se non c'e' di meglio, il sistema usa "meta' via" (coordinate
+# approssimate). Non per "civico non presente in ANNCSU" (puo' essere sbagliato
+# l'indirizzo, non la coordinata), ne' per "dentro un distretto di un altro
+# comune" / "lontana dai distretti" (senza confini ISTAT: casi ambigui, in
+# campagna) ne' per gli errori di formato (hanno la loro correzione).
+PROBLEMI_COORDINATA_SBAGLIATA = (
+    "Coordinate mancanti", "Coordinate a 0,0", "Coordinate fuori provincia", "Fuori dal comune",
+    "Coordinata segnaposto", "Lontana dal suo civico", "Lontana dalla sua via", "Lontana dal resto della via", "Cade in ",
+)
+
+FONTE_META_VIA = "coordinate approssimate: conosco solo la via (meta' via)"
+
+
+def meta_via(p: pd.DataFrame, comune: str, chiavi: set[str]) -> dict[str, tuple[float, float, str]]:
+    """{chiave: (lat, lon, nome OSM)} a meta' via per le prese in `chiavi` la
+    cui via e' abbinata a OSM (Daniele, 30/09/2026: se non conosco il civico
+    ma la via, la metto a meta' via, dichiarandolo; se non ho idea non la
+    cambio)."""
+    osm = vie_osm.vie_comune(comune)
+    if not osm or not chiavi:
+        return {}
+    vie = {k: stradario.normalizza_indirizzo(i)[0] for k, i in zip(p["CHIAVE"], p["INDIRIZZO"]) if k in chiavi}
+    abbinate = vie_osm.abbina(sorted(set(vie.values()) - {""}), list(osm))
+    punti: dict[str, tuple[float, float]] = {}
+    esito = {}
+    for k, via in vie.items():
+        nome = abbinate.get(via)
+        if not nome:
+            continue
+        if nome not in punti:
+            punti[nome] = vie_osm.punto_meta_via(osm[nome])
+        esito[k] = (round(punti[nome][0], 6), round(punti[nome][1], 6), nome)
+    return esito
+
+
 def _scala(valore: float, cifre_intere: int) -> float:
     """8742620 -> 8.742620 (cifre_intere=1), 4531012 -> 45.31012 (2): la
     virgola persa nell'estrazione."""
@@ -334,6 +371,33 @@ _CACHE_COORDINATE: dict = {"versione": None, "dati": {}}
 
 _LOCK_COORDINATE = threading.Lock()
 
+def salva_coordinate_sistema(comune: str, df: pd.DataFrame) -> int:
+    """Salva nella tabella coordinate_sistema le coordinate di sistema del
+    comune (istantanea completa: le prese che Neta ha nel frattempo corretto
+    non sono piu' in `df` e spariscono, cioe' risultano recepite). Restituisce
+    quante ne ha salvate."""
+    comune = comune.strip().upper()
+    s = df[df["LAT_SIS"].notna()] if "LAT_SIS" in df.columns else df.iloc[0:0]
+    adesso = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    righe = [
+        (comune, r.CHIAVE, float(r.LAT_SIS), float(r.LON_SIS), r.FONTE_SIS, r.AFF_SIS, r.PROBLEMA,
+         None if pd.isna(r.LAT) else float(r.LAT), None if pd.isna(r.LON) else float(r.LON), adesso)
+        for r in s.itertuples(index=False)
+    ]
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        conn.execute("DELETE FROM coordinate_sistema WHERE LOCALITA=?", (comune,))
+        conn.executemany("INSERT INTO coordinate_sistema VALUES (?,?,?,?,?,?,?,?,?,?)", righe)
+        conn.commit()
+    return len(righe)
+
+
+def _n_coordinate_sistema(comune: str) -> int:
+    with database.connessione() as conn:
+        assicura_tabelle(conn)
+        return conn.execute("SELECT COUNT(*) FROM coordinate_sistema WHERE LOCALITA=?", (comune.strip().upper(),)).fetchone()[0]
+
+
 def coordinate_da_verificare(comune: str) -> pd.DataFrame:
     """Come _coordinate_da_verificare, in memoria finche' i dati non cambiano
     (circa un minuto per i 22 comuni: si calcola in background dopo ogni
@@ -348,6 +412,13 @@ def coordinate_da_verificare(comune: str) -> pd.DataFrame:
     if risultato is None:
         risultato = _coordinate_da_verificare(comune)
         cache_disco.salva(f"coordinate_{comune}", (comune, versione), risultato)
+        salva_coordinate_sistema(comune, risultato)
+    elif not risultato.empty:
+        # Cache su disco valida: la tabella si rifa da sola se non torna
+        # (DB nuovo o copiato, comune mai salvato).
+        attese = int(risultato["LAT_SIS"].notna().sum()) if "LAT_SIS" in risultato.columns else 0
+        if attese != _n_coordinate_sistema(comune):
+            salva_coordinate_sistema(comune, risultato)
     with _LOCK_COORDINATE:
         if _CACHE_COORDINATE["versione"] == versione:
             _CACHE_COORDINATE["dati"][comune] = risultato
@@ -500,8 +571,25 @@ def _coordinate_da_verificare(comune: str) -> pd.DataFrame:
     nota[bassa] = "stima non affidabile, da rilevare sul posto — " + nota[bassa]
     nota[(problema != "") & (affidabilita == "")] = "nessuna stima possibile, da rilevare sul posto"
 
+
+    # Coordinata "di sistema" (Daniele, 30/09/2026): quella che l'app usa al
+    # posto di quella di Neta finche' Neta non corregge. Alta o media = la
+    # proposta per Neta; senza proposta affidabile ma con la coordinata
+    # certamente sbagliata e la via nota, meta' via ("approssimata"); senza
+    # idea, nessuna. Non va MAI a Neta (le approssimate non stanno nell'Excel).
+    lat_s, lon_s, fonte_s = lat_c.copy(), lon_c.copy(), fonte_c.copy()
+    aff_s = affidabilita.where(lat_s.notna(), "")
+    sbagliata = problema.str.startswith(PROBLEMI_COORDINATA_SBAGLIATA) & lat_s.isna()
+    approssimate = meta_via(p, comune, set(p.loc[sbagliata, "CHIAVE"]))
+    for i, k in enumerate(p["CHIAVE"]):
+        if k in approssimate:
+            lat_s.iloc[i], lon_s.iloc[i], _ = approssimate[k]
+            fonte_s.iloc[i] = f"{FONTE_META_VIA}: {approssimate[k][2]}"
+            aff_s.iloc[i] = "approssimata"
+
     p = p.assign(PROBLEMA=problema, DISTANZA_M=distanza, LAT_CORRETTA=lat_c, LON_CORRETTA=lon_c,
-                 FONTE_COORDINATA=fonte_c, AFFIDABILITA=affidabilita, NOTA_PROPOSTA=nota)
+                 FONTE_COORDINATA=fonte_c, AFFIDABILITA=affidabilita, NOTA_PROPOSTA=nota,
+                 LAT_SIS=lat_s, LON_SIS=lon_s, FONTE_SIS=fonte_s, AFF_SIS=aff_s)
     return p[p["PROBLEMA"] != ""].reset_index(drop=True)
 
 def esporta_coordinate_excel(comuni: list[str]) -> bytes:

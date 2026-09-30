@@ -199,6 +199,18 @@ def proietta(lat: float, lon: float, tratti: list[np.ndarray]) -> tuple[int, flo
     return migliore
 
 
+def punto_meta_via(tratti: list[np.ndarray]) -> tuple[float, float]:
+    """(lat, lon) di meta' via: la meta' del tratto piu' lungo (le vie OSM
+    sono spesso spezzate in piu' tratti non collegati). Coordinata
+    approssimata per i DP di cui si conosce solo la via."""
+    lunghezze = []
+    for t in tratti:
+        xy, _, _ = _metri(t, float(t[:, 1].mean()))
+        lunghezze.append(float(np.hypot(*np.diff(xy, axis=0).T).sum()))
+    k = int(np.argmax(lunghezze))
+    return punto_lungo(tratti[k], lunghezze[k] / 2)
+
+
 def punto_lungo(tratto: np.ndarray, lungo: float) -> tuple[float, float]:
     """(lat, lon) del punto a `lungo` metri dall'inizio del tratto."""
     lat0 = float(tratto[:, 1].mean())
