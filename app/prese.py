@@ -543,7 +543,7 @@ _CACHE_OSM_FUORI: dict = {}
 # questa quota NO DISTRETTO in Neta.
 _RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
 
-MIN_DP_FRAZIONE = 5
+MIN_DP_FRAZIONE = 2
 QUOTA_FRAZIONE_ND = 0.9
 
 

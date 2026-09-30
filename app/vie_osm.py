@@ -155,13 +155,17 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
                 extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
                 if "PRIVATA" in po and "PRIVATA" not in pv:
                     extra += 2  # via privata solo se non c'e' quella pubblica
-                candidati.append((extra, 0 if t_osm == tipo else 1, nome))
+                # A parita' vince chi ha piu' parole identiche: la tolleranza sui refusi
+                # (GALILEI ~ GALILEO) faceva pareggiare Via Galileo Galilei e Via Galileo
+                # Ferraris (Daniele, 30/09/2026, Broni).
+                esatte = sum(a in po for a in pv)
+                candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, nome))
         if not candidati:
             continue
         candidati.sort()
-        if len(candidati) > 1 and candidati[0][:2] == candidati[1][:2]:
+        if len(candidati) > 1 and candidati[0][:3] == candidati[1][:3]:
             continue
-        esito[via] = candidati[0][2]
+        esito[via] = candidati[0][3]
     return esito
 
 
