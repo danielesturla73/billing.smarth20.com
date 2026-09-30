@@ -635,7 +635,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948',
                    '#0E7C86', '#8a5a2b', '#6d8f00', '#b0369a', '#3d5a80', '#c08000', '#5aa9e6', '#7a4ea3'];
   const speciale = { 'NO DISTRETTO': GRIGIO, '*': '#0F2438' };
-  const codiciPunti = [...new Set(PUNTI.map(p => p.DISTRETTO_PRINCIPALE))].filter(c => !speciale[c] && !c.toUpperCase().startsWith('NO'));
+  const codiciPunti = [...new Set(PUNTI.flatMap(p => [p.DISTRETTO_PRINCIPALE, p.CONFERMATO].filter(Boolean)))].filter(c => !speciale[c] && !c.toUpperCase().startsWith('NO'));
   const codiciConfini = GEOJSON.features.map(f => f.properties.codice_distretto).filter(c => DISTRETTI_COMUNE.has(c));
   const codici = [...new Set([...codiciPunti, ...codiciConfini])].sort();
   const COLORI = Object.fromEntries(codici.map((c, i) => [c, PALETTE[i % PALETTE.length]]));
@@ -649,9 +649,16 @@ document.getElementById('genera-stradario').addEventListener('click', async func
              fillColor: mio ? COLORI[c] : '#6B7F8A', fillOpacity: mio ? 0.07 : 0.03 };
   });
 
-  const perDistretto = {};
+  // Legenda a due colonne (Daniele, 30/09/2026): "A sistema" = distretto dopo le
+  // conferme (quello che entra nei volumi), "In Neta" = distretto che Neta ha
+  // ancora scritto e che deve correggere. Un DP confermato in un altro distretto
+  // conta in due righe: in Neta nel vecchio, a sistema nel nuovo.
+  const perDistretto = {};  // codice -> { marcatori: Set, neta: n, sistema: n }
+  const voceDi = c => (perDistretto[c] = perDistretto[c] || { marcatori: new Set(), neta: 0, sistema: 0 });
+  const tuttiMarcatori = [];
   PUNTI.forEach(function (p) {
     const c = p.DISTRETTO_PRINCIPALE;
+    const cs = p.CONFERMATO || c;
     // Presa gia' confermata in un altro distretto: bordo spesso del colore di destinazione.
     const spostata = p.CONFERMATO && p.CONFERMATO !== p.DISTRETTO;
     const m = L.circleMarker([p.LAT, p.LON], {
@@ -669,28 +676,34 @@ document.getElementById('genera-stradario').addEventListener('click', async func
          <input class="campo-nota" placeholder="Nota (perché)" size="16">
          <button type="button" class="btn-primario azione-sposta">Sposta</button></div>` : ''));
     m.on('click', () => { if (disegnando) m.closePopup(); });
-    (perDistretto[c] = perDistretto[c] || { marcatori: [], n: 0 }).marcatori.push(m);
-    perDistretto[c].n += 1;
+    tuttiMarcatori.push(m);
+    voceDi(c).neta += 1; voceDi(c).marcatori.add(m);
+    voceDi(cs).sistema += 1; voceDi(cs).marcatori.add(m);
   });
-  const gruppi = Object.fromEntries(Object.entries(perDistretto).map(([c, v]) => [c, L.layerGroup(v.marcatori).addTo(mappa)]));
+  const stratoTutti = L.layerGroup(tuttiMarcatori).addTo(mappa);
 
   function disegnaLegenda() {
-    const voci = Object.keys(perDistretto).sort((a, b) => (a in COLORI) - (b in COLORI) || a.localeCompare(b)).reverse();
+    const voci = Object.keys(perDistretto).filter(c => perDistretto[c].neta || perDistretto[c].sistema).sort((a, b) => (a in COLORI) - (b in COLORI) || a.localeCompare(b)).reverse();
     document.getElementById('legenda-distretti').innerHTML =
-      '<table><thead><tr><th>Distretto</th><th class="num">DP</th></tr></thead><tbody>' +
+      '<table><thead><tr><th>Distretto</th><th class="num" title="Distretto dopo le tue conferme: è quello che entra nei volumi">A sistema</th>' +
+      '<th class="num" title="Distretto che Neta ha ancora scritto: da correggere da parte sua">In Neta</th></tr></thead><tbody>' +
       voci.map(c => `<tr class="voce-legenda${filtro === c ? ' attiva' : ''}${filtro && filtro !== c ? ' spenta' : ''}" data-codice="${esc(c)}">
         <td><i style="background:${coloreDi(c)}"></i><span class="mono">${esc(c)}</span>
           <span class="testo-tenue">${esc(NOMI[c] && NOMI[c] !== c ? NOMI[c] : '')}</span></td>
-        <td class="num">${fmt(perDistretto[c].n)}</td></tr>`).join('') +
-      '</tbody></table><p class="nota-metodologica" style="margin-top:8px">Bordo rosso = DP con distretto di un altro comune. Bordo spesso colorato = DP già confermato in un altro distretto (il colore è quello di destinazione).</p>';
+        <td class="num">${fmt(perDistretto[c].sistema)}</td><td class="num">${fmt(perDistretto[c].neta)}</td></tr>`).join('') +
+      `<tr><td><strong>Totale</strong></td><td class="num"><strong>${fmt(voci.reduce((t, c) => t + perDistretto[c].sistema, 0))}</strong></td>` +
+      `<td class="num"><strong>${fmt(voci.reduce((t, c) => t + perDistretto[c].neta, 0))}</strong></td></tr>` +
+      '</tbody></table><p class="nota-metodologica" style="margin-top:8px"><strong>A sistema</strong> = distretto dopo le tue conferme (entra nei volumi); <strong>In Neta</strong> = distretto ancora scritto da Neta, da correggere. Bordo rosso = DP con distretto di un altro comune. Bordo spesso colorato = DP già confermato in un altro distretto (il colore è quello di destinazione).</p>';
   }
   document.getElementById('legenda-distretti').addEventListener('click', function (e) {
     const voce = e.target.closest('.voce-legenda');
     if (!voce) return;
     filtro = filtro === voce.dataset.codice ? null : voce.dataset.codice;
-    Object.entries(gruppi).forEach(([c, g]) => { if (!filtro || c === filtro) g.addTo(mappa); else g.remove(); });
+    // Con un distretto scelto: i DP che ci sono a sistema o in Neta.
+    stratoTutti.clearLayers();
+    (filtro ? [...perDistretto[filtro].marcatori] : tuttiMarcatori).forEach(m => stratoTutti.addLayer(m));
     if (filtro) {
-      const b = L.latLngBounds(perDistretto[filtro].marcatori.map(m => m.getLatLng()));
+      const b = L.latLngBounds([...perDistretto[filtro].marcatori].map(m => m.getLatLng()));
       if (b.isValid()) mappa.fitBounds(b, { padding: [30, 30], maxZoom: 17 });
     }
     disegnaLegenda();
