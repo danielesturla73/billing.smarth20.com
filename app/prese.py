@@ -642,6 +642,16 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     p["COORD_SISTEMA"] = p["AFF_SIS"] != ""
     usa_sis = p["AFF_SIS"].isin(["alta", "media"]).to_numpy()
     approssimata = (p["AFF_SIS"] == "approssimata").to_numpy()  # coordinata di Neta certamente sbagliata: niente proposta dalla posizione
+    # Coordinata di Neta con un problema certo (fuori dal comune, lontana dalla sua via o dal suo
+    # civico, segnaposto...) e senza una coordinata di sistema alta/media che la sostituisca: non
+    # genera proposte (Daniele, 30/09/2026, Cassolnovo Via Baldacchini 20: coordinata a 18 km, in
+    # Garlasco, e proposta DGR08 di un altro comune).
+    if con_proposta:
+        from app.prese_coordinate import PROBLEMI_COORDINATA_SBAGLIATA, coordinate_da_verificare
+        da_verificare = coordinate_da_verificare(comune)
+        if not da_verificare.empty:
+            sbagliate = set(da_verificare.loc[da_verificare["PROBLEMA"].str.startswith(PROBLEMI_COORDINATA_SBAGLIATA), "CHIAVE"])
+            approssimata = approssimata | (p["CHIAVE"].isin(sbagliate).to_numpy() & ~usa_sis)
     lat = np.where(usa_sis, p["LAT_SIS"], p["LAT"].where(p["COORD_VALIDE"] & ~approssimata)).astype(float)
     lon = np.where(usa_sis, p["LON_SIS"], p["LON"].where(p["COORD_VALIDE"] & ~approssimata)).astype(float)
     proposte = proponi_distretti(lat, lon) if con_proposta else [("", None)] * len(p)
