@@ -408,6 +408,19 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     # quale fonte. D_POSIZIONE = dove cade la coordinata di Neta.
     strade = stradario.carica(comune)
     p["D_STRADARIO"] = stradario.distretti_da_via(strade, p["INDIRIZZO"]) if not strade.empty else ""
+    # Riga dello stradario "tutta la via" costruita su pochi DP (Daniele, 30/09/2026, Via Papa
+    # Giovanni XXIII a Casorate Primo: riga DCSP02 nata da 1 DP, mentre 5 DP su 6 della via sono
+    # DCSP01 e la via sta in DCSP01): non conta se poggia su MAX_DP_STRADARIO_DEBOLE DP o meno e
+    # la via ha oggi almeno 3 DP con almeno l'80% in un altro distretto.
+    if not strade.empty:
+        vie_dp = pd.Series([stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]], index=p.index)
+        for riga in strade[(strade["civici"] == "tutti") & (strade["n_prese"] <= MAX_DP_STRADARIO_DEBOLE)].itertuples():
+            gruppo = p[vie_dp == riga.via]
+            if len(gruppo) < 3:
+                continue
+            principale = gruppo["DISTRETTO_PRINCIPALE"].value_counts()
+            if principale.index[0] != riga.distretto and principale.iloc[0] >= 0.8 * len(gruppo):
+                p.loc[gruppo.index[gruppo["D_STRADARIO"] == riga.distretto], "D_STRADARIO"] = ""
     civ = anncsu.civici_per_indirizzo(comune, p["INDIRIZZO"])
     p["CIV_LAT"] = civ["CIV_LAT"].to_numpy()
     p["CIV_LON"] = civ["CIV_LON"].to_numpy()
@@ -551,6 +564,9 @@ _CACHE_OSM_FUORI: dict = {}
 _RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
 
 MIN_DP_FRAZIONE = 2
+
+# Una riga dello stradario poggiata su tanti DP o meno e' "debole" (vedi _prese_comune).
+MAX_DP_STRADARIO_DEBOLE = 2
 QUOTA_FRAZIONE_ND = 0.9
 
 
