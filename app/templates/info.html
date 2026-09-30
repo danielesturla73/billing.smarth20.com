@@ -119,6 +119,8 @@
       sempre un errore.</li>
     <li><strong>Coordinata</strong>: latitudine e longitudine del punto di erogazione, cioè dove si trova sulla mappa. Quelle di Neta
       sono spesso sbagliate, e Neta ha assegnato i distretti proprio in base a quelle coordinate.</li>
+    <li><strong>Coordinata calcolata</strong> (o "di sistema"): la coordinata che l'app calcola quando quella di Neta è sbagliata
+      e che usa, al posto di quella di Neta, sulla mappa e nelle proposte. Vedi <a href="#coordinate-sistema">più sotto</a>.</li>
     <li><strong>Stradario</strong>: la tabella che dice in quale distretto sta ogni via, o ogni tratto di via.</li>
   </ul>
 
@@ -151,10 +153,32 @@
   <p>Più fonti concordano, più la proposta è sicura. Se compare solo una fonte, le altre non erano disponibili per quel
     punto di erogazione (civico non posizionato, via non trovata…). Una ✗ non vuol dire che la proposta sia sbagliata: vuol dire che
     quella fonte dice un'altra cosa, ed è meglio guardare la mappa prima di confermare.</p>
+  <p>Può comparire anche <strong>civico ANNCSU fuori ✗</strong>: il civico esiste ma sta fuori da ogni distretto, quindi
+    l'indirizzo è fuori dalla rete e <em>NO DISTRETTO</em> potrebbe essere giusto (per esempio Via Novarini 19 a Broni, che è
+    fuori distretto anche se la coordinata di Neta, sbagliata di 330 m, cadeva in DBRN03). La proposta resta visibile ma non è
+    mai "sicura". Attenzione ai comuni con confini disegnati male (a Siziano il confine dei distretti è sbagliato): lì questa ✗
+    può essere un falso allarme.</p>
+
+  <h3>Le etichette: sicura, da verificare, da decidere</h3>
+  <p>Nell'elenco ogni DP ancora da confermare ha una <strong>barra colorata</strong> a sinistra e un'etichetta. In alto, sopra
+    l'elenco, i totali per livello.</p>
+  <ul>
+    <li><strong style="color:#1C7C4C">Verde · ✓ sicura</strong>: almeno due fonti e tutte concordano. Sono le sole che
+      "Conferma le proposte sicure" conferma in blocco.</li>
+    <li><strong style="color:#B9700B">Ambra · "2 su 3 fonti"</strong>: la maggioranza delle fonti concorda, ma almeno una
+      dissente (✗). Da guardare prima di confermare.</li>
+    <li><strong style="color:#6B7F8A">Grigia · "1 fonte"</strong>: una sola fonte e nessun riscontro. Non si conferma in blocco.</li>
+    <li><strong style="color:#B3261E">Rossa · "da decidere"</strong>: non si sa in che distretto metterlo. Può succedere perché
+      non c'è nessuna proposta, perché le fonti indicano distretti diversi, o perché la proposta è solo "il distretto più
+      vicino" (coordinata fuori da ogni distretto) e il civico sta fuori rete. Non è una questione di quante fonti ci sono.</li>
+  </ul>
+  <p>I DP già confermati non hanno la barra. Passando il mouse sull'etichetta compare il motivo.</p>
 
   <h3>Cosa fare, punto di erogazione per punto di erogazione</h3>
   <ol>
-    <li>Clicca il punto di erogazione nell'elenco: la mappa lo mostra, con i confini dei distretti.</li>
+    <li>Clicca il punto di erogazione nell'elenco: la mappa lo mostra, con i confini dei distretti. Con <strong>📍 mostra la
+      via</strong> vedi anche dove sta la via (tracciato di OpenStreetMap, in magenta) e il suo civico ANNCSU, per capire quanto
+      la coordinata di Neta è lontana. Se la via non è in OpenStreetMap compare solo il civico.</li>
     <li>Leggi il <strong>motivo</strong> (perché è segnalato), la <strong>proposta</strong> e le
       <strong>fonti</strong>.</li>
     <li>Scegli:
@@ -164,8 +188,8 @@
           giusto. Il DP è "validato" e non va a Neta;</li>
         <li>non fare niente, se non sei sicuro: il DP resta da decidere.</li>
       </ul></li>
-    <li><strong>Conferma le proposte sicure</strong> conferma in un colpo solo i DP su cui almeno due fonti sono
-      disponibili e concordano tutte.</li>
+    <li><strong>Conferma le proposte sicure</strong> conferma in un colpo solo i DP con la barra verde: almeno due fonti sono
+      disponibili e concordano tutte. Prima puoi controllarli: hanno tutti la stessa etichetta verde.</li>
     <li>Quando hai finito, dalla pagina Punti di erogazione usa <strong>Registra invio</strong>: scarica il file per Neta e se lo segna,
       per sapere poi cosa Neta ha sistemato e cosa sollecitare.</li>
   </ol>
@@ -317,6 +341,22 @@
     <li><strong>in un altro distretto rispetto al suo indirizzo</strong>.</li>
   </ul>
   <p>La coordinata proposta ha sempre la sua fonte e un'affidabilità (vedi la <a href="#guida-prese">guida</a>).</p>
+  <p id="coordinate-sistema"><strong>Coordinate di sistema.</strong> Le coordinate calcolate dall'app non restano solo nel file
+    per Neta: si salvano in automatico (tabella <code>coordinate_sistema</code>, rifatta a ogni estrazione) e la mappa e le
+    proposte le usano al posto di quelle sbagliate di Neta. Livelli:</p>
+  <ul>
+    <li><strong>alta</strong> o <strong>media</strong>: sono le coordinate proposte a Neta (civico ANNCSU, correzione del
+      formato, interpolazione lungo la via);</li>
+    <li><strong>approssimata</strong>: quando la coordinata di Neta è certamente sbagliata (mancante, fuori comune, segnaposto,
+      lontana da civico o via) e non c'è una stima affidabile ma si conosce la via, il DP si mette <strong>a metà della
+      via</strong> (metà del tratto più lungo in OpenStreetMap), con la nota "coordinate approssimate: conosco solo la via".
+      Se non si sa niente, la coordinata non si cambia. Le approssimate non vanno <em>mai</em> a Neta.</li>
+  </ul>
+  <p>Le coordinate di Neta in archivio non si toccano mai e confermare un DP non le sposta. Quando Neta corregge una coordinata, il
+    DP esce da solo dalla tabella al ricalcolo successivo. La posizione calcolata <strong>non conta come fonte
+    indipendente</strong> del distretto (nasce dal civico o dalla via): nelle proposte compare come "punto calcolato", non è
+    mai una fonte in più e vale solo se cade dentro un distretto. Per le approssimate la posizione non genera nessuna proposta.</p>
+
   <ol>
     <li><em>Civico ANNCSU</em>: affidabilità alta se il Comune l'ha posizionato con rilievo o cartografia (metodi 1-4),
       media se l'ha inserito dal Portale per i Comuni (metodo 5).</li>

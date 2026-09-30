@@ -292,4 +292,37 @@
       vuole gli allacci veri.</li>
   </ul>
 </div>
+<div class="panel storia-voce">
+  <div class="data">30/09/2026</div>
+  <h2>Punti di erogazione: fonti che dissentono, etichette, "mostra la via" e coordinate di sistema</h2>
+  <p>Partito da Via Novarini 19 a Broni: l'app proponeva DBRN03 invece di NO DISTRETTO. La coordinata di Neta, sbagliata di
+    330 m, cadeva in DBRN03, mentre il civico ANNCSU e la via sono fuori da ogni distretto.</p>
+  <ul>
+    <li><strong>Civico fuori distretto = fonte che dissente</strong>: se il civico ANNCSU esiste ma cade fuori da ogni distretto,
+      in "Fonti" compare <em>civico ANNCSU fuori ✗</em> e la proposta non è mai "sicura". Prima l'app trattava quel caso come
+      "nessuna informazione" e ripiegava sulla posizione. Provata anche la cancellazione della proposta: toglieva circa 270
+      proposte in 7 comuni, alcune forse valide, quindi si è scelto di lasciarla visibile ma da decidere.</li>
+    <li><strong>Etichette nell'elenco</strong>: barra colorata e etichetta per ogni DP da confermare. Verde <em>sicura</em>,
+      ambra <em>2 su 3 fonti</em>, grigia <em>1 fonte</em>, rossa <em>da decidere</em> (non si sa in che distretto
+      metterlo, anche se non è questione di conteggio: il nome "discordi" era fuorviante). Totali per livello sopra l'elenco.
+      Il bottone "Conferma le proposte sicure" conferma solo le verdi.</li>
+    <li><strong>📍 mostra la via</strong>: nuovo <code>GET /prese/via</code> e pulsante nella riga. Disegna sulla mappa il
+      tracciato OpenStreetMap della via e il civico ANNCSU, per vedere dove dovrebbe stare il DP.</li>
+    <li><strong>Coordinate di sistema</strong>: le coordinate calcolate dall'app si salvano in automatico
+      (<code>coordinate_sistema</code>, rifatta a ogni estrazione) e mappa e proposte le usano al posto di quelle sbagliate di
+      Neta. Alta/media = civico ANNCSU, correzione del formato, interpolazione; <em>approssimata</em> = a metà via, con la
+      nota "conosco solo la via", solo quando la coordinata di Neta è certamente sbagliata. Senza idea non si cambia.
+      All'avvio 8.788 DP in 22 comuni, di cui circa 1.900 approssimati.
+      <ul>
+        <li>Le coordinate di Neta non si toccano; il file per Neta resta identico (controllato su Broni: 887 righe, 684
+          proposte); le approssimate non vanno mai a Neta; confermare un DP non sposta la sua coordinata.</li>
+        <li>La posizione calcolata non è una fonte indipendente di distretto: proposta "punto calcolato", solo se dentro un
+          distretto, mai in "Fonti". Via Novarini 19 ora ha come coordinata il civico ed è NO DISTRETTO senza proposta.</li>
+      </ul></li>
+    <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
+      "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
+      allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
+      metà via (proposta: solo se la coordinata di Neta è a più di 60 m dalla via) e circa 450 DP di vie non abbinate a OSM.</li>
+  </ul>
+</div>
 {% endblock %}
