@@ -447,6 +447,10 @@
       civico si usa la riga senza esponente (l'"1", non l'"1/A"; Neta non scrive l'esponente); se anche così le posizioni distano più di 150 m il civico è ambiguo e non si usa. Su tutti i comuni, sui 38.761 DP con civico
       posizionato: 1.000 cambiano posizione di più di 30 m (Gambolò 358, Casteggio 191, Stradella 80, Voghera 72, Siziano 66, Belgioioso 61) e 116 diventano ambigui (Gambolò 89, Voghera 24, Casteggio 3). Cambiano di conseguenza
       il distretto del civico, i problemi di coordinata e le coordinate calcolate, che si ricalcolano da sole. Lo stradario salvato non è stato rigenerato.</li>
+    <li><strong>Stradario rigenerato per tutti i comuni</strong>: dopo la correzione dei civici ANNCSU (riga senza esponente, civici ambigui) e delle regole di abbinamento dei nomi, lo stradario di tutti i 22 comuni è stato
+      rigenerato dai dati attuali, prima su una copia e confrontato con quello vecchio; le 1.298 conferme sono risultate identiche prima e dopo (lo stradario cambia solo le proposte). Cambiano 14 comuni e solo 4 vie hanno un distretto diverso:
+      Giussago Via F.lli Cairoli (da "a cavallo" a DGSG06, 52 DP), Gambolò Via Agricoltura - Fraz. Stradella (da DGM03 a "a cavallo", 19), Broni Via Priv. Marconi (da DBRN02 a DBRN01, 18), Mortara Via S. Albino (da DMR10 a DMR06, 3).
+      Nel file cambia in tutte le righe anche la dicitura delle note ("da prese Neta" diventa "da punti di erogazione Neta"). Si torna indietro con un revert del commit.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
