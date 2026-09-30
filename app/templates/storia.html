@@ -400,6 +400,12 @@
       con le stesse parole (Via Stazione / Via della Stazione, Via Carlo Emanuele Terzo / Via Carlo Emanuele III…) diventano una sola strada
       con i tratti sommati. 27 gruppi in 14 comuni, 11 abbinamenti nuovi e nessuno perso (Broni, Casorate Primo, Cassolnovo, Garlasco,
       Giussago, Mede, Mortara, Rivanazzano Terme).</li>
+    <li><strong>Cava Manara e San Martino Siccomario associabili, in tutti e due i sensi</strong>: a Cava Manara 67 DP hanno DSMS01 o DSMS02 (distretti di San Martino Siccomario) e a
+      San Martino Siccomario 26 DP hanno DCVM02 o DCVM03 (di Cava Manara), tutti segnalati "altro comune". In
+      <code>distretti_comuni.csv</code> i "comuni associabili" erano vuoti: aggiunti DSMS01 e DSMS02 per Cava Manara, DCVM02 e DCVM03 per
+      San Martino Siccomario. Effetto: a Cava Manara i DP "altro comune" passano da 69 a 2 (DBRN01, distretto di Broni), a San Martino
+      da 26 a 9 (DCPV02). Cambiano anche i volumi: questi DP ora contano nel distretto valido (DSMS01…) invece di restare fuori dai
+      totali di distretto, e per WMS i distretti sono sommati sui due comuni.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
