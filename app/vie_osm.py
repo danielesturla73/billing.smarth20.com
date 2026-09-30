@@ -53,8 +53,13 @@ def parole(nome: str) -> tuple[str, frozenset[str]]:
     if grezze and grezze[0] in NON_VIE:
         return grezze[0], frozenset()
     tipo = ""
-    while len(grezze) > 1 and grezze[0] in TIPI:
+    privata = False
+    while len(grezze) > 1 and (grezze[0] in TIPI or grezze[0] == "PRIV"):
         tipo = tipo or grezze[0]
+        # "privata" distingue la via (Daniele, 30/09/2026, Broni: VIA MARCONI si
+        # abbinava a "Via privata Marconi" invece di "Via Guglielmo Marconi"):
+        # e' una parola del nome, non solo un tipo.
+        privata = privata or grezze[0] in ("PRIVATA", "PRIV")
         grezze = grezze[1:]
     out = []
     for k, p in enumerate(grezze):
@@ -68,6 +73,8 @@ def parole(nome: str) -> tuple[str, frozenset[str]]:
         if len(p) == 1 and p.isalpha():
             continue  # iniziale (A. SPINELLI, G. VERDI)
         out.append(p)
+    if privata:
+        out.append("PRIVATA")
     return tipo, frozenset(out)
 
 
@@ -143,8 +150,11 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
             continue
         candidati = []
         for nome, t_osm, po in osm:
-            if _contenute(pv, po) or (po and _contenute(po, pv) and len(pv) - len(po) <= 1):
+            po_nome = po - {"PRIVATA"}  # il nome OSM contenuto in quello Neta (Strada Privata M. Sironi = VIA MARIO SIRONI)
+            if _contenute(pv, po) or (po_nome and _contenute(po_nome, pv) and len(pv) - len(po_nome) <= 1):
                 extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
+                if "PRIVATA" in po and "PRIVATA" not in pv:
+                    extra += 2  # via privata solo se non c'e' quella pubblica
                 candidati.append((extra, 0 if t_osm == tipo else 1, nome))
         if not candidati:
             continue
