@@ -490,7 +490,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
         <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || (r.ORIGINE === 'manuale' || r.ORIGINE === 'zona' ? ORIGINE_TESTO[r.ORIGINE] : 'sistemata'))}</span>
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>
-      <div>${esc(r.INDIRIZZO)} <button type="button" class="btn-link azione-via" title="Mostra in mappa dove sta la via (e il civico), non il punto">📍 mostra la via</button></div>
+      <div>${esc(r.INDIRIZZO)} <button type="button" class="btn-link azione-via" title="Mostra in mappa dove sta la via (e il civico), non il punto">📍 mostra la via</button>
+        <a class="btn-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(r.INDIRIZZO).trim() + ', ' + COMUNE + ', Italia')}" title="Apre Google Maps sull'indirizzo, in un'altra scheda: per controllare a mano dove sta il civico">Google Maps</a></div>
       <div class="testo-tenue">${r.N_SERVIZI === 1 ? 'Servizio' : r.N_SERVIZI + ' servizi'}: <span class="mono">${esc(r.SERVIZI)}</span></div>
       <div>${testoProposta(r)}</div>
       ${conferma}${modulo}
