@@ -559,6 +559,14 @@ def _prese_comune(comune: str) -> pd.DataFrame:
 _CACHE_OSM_UNICO: dict = {}
 _CACHE_OSM_FUORI: dict = {}
 
+# Quota minima del tracciato di una via OSM in un solo distretto perche' la fonte "via OSM" conti.
+# Ridotta da 95% a 90% (Daniele, 30/09/2026: Via Roma a Cassolnovo, al 94% in DCS02, e' tutta DCS02 a
+# occhio; la misura ha dato 2.078 DP con la via OSM in piu', 93% concordi con lo stradario).
+SOGLIA_OSM_UNICO = 0.90
+
+# Quota minima della via OSM fuori da ogni distretto perche' la fonte dica NO DISTRETTO: resta al 95%.
+SOGLIA_OSM_FUORI = 0.95
+
 # Fonte "resto della frazione": almeno tanti altri DP nella frazione, e almeno
 # questa quota NO DISTRETTO in Neta.
 _RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
@@ -578,13 +586,13 @@ def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
     if chiave not in _CACHE_OSM_UNICO:
         esito = {}
         for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items():
-            if quote and quote[0][0] != "fuori" and quote[0][1] >= 0.95:
+            if quote and quote[0][0] != "fuori" and quote[0][1] >= SOGLIA_OSM_UNICO:
                 esito[via] = quote[0][0]
         _CACHE_OSM_UNICO[chiave] = esito
         # Vie il cui tracciato sta almeno al 95% fuori da ogni distretto: la
         # fonte "via OSM" dice NO DISTRETTO (Daniele, 30/09/2026).
         _CACHE_OSM_FUORI[chiave] = {via for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items()
-                                    if quote and quote[0][0] == "fuori" and quote[0][1] >= 0.95}
+                                    if quote and quote[0][0] == "fuori" and quote[0][1] >= SOGLIA_OSM_FUORI}
     return _CACHE_OSM_UNICO[chiave]
 
 
