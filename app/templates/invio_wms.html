@@ -18,6 +18,8 @@
 <div class="esito-ok">
   <strong>Invio {{ esito.id }} fatto.</strong> {{ esito.conteggi.creato }} righe create, {{ esito.conteggi.aggiornato }} aggiornate,
   {{ esito.conteggi.invariato }} invariate, {{ esito.conteggi.scartato }} scartate, {{ esito.conteggi.cancellato or 0 }} cancellate.
+  {% if esito.indicatori %}Indicatori: {{ esito.indicatori.creato }} nuovi, {{ esito.indicatori.aggiornato }} aggiornati,
+  {{ esito.indicatori.cancellato }} cancellati.{% endif %}
   In WMS il bilancio dei comuni in cache si aggiorna al prossimo ricalcolo.
 </div>
 {% endif %}
@@ -53,11 +55,17 @@
     <strong>{{ c.creato }}</strong> nuove, <strong>{{ c.aggiornato }}</strong> aggiornate,
     {{ c.invariato }} invariate, <strong>{{ c.scartato }}</strong> scartate, <strong>{{ c.cancellato or 0 }}</strong> da cancellare.
   </p>
+  {% if anteprima.indicatori %}{% set ci = anteprima.indicatori %}
+  <p style="margin-top:0">Indicatori (punti di erogazione e utenze attive per distretto, fatturato per tipo d'uso, fuori distretto per comune):
+    {{ ci.creato }} nuovi, {{ ci.aggiornato }} aggiornati, {{ ci.invariato }} invariati, {{ ci.scartato }} scartati
+    (distretto che WMS non conosce), {{ ci.cancellato }} da cancellare.</p>
+  {% endif %}
   {% if anteprima.mesi_esclusi %}
   <p class="nota-metodologica" style="margin-top:0">Mesi non inviati (apertura dell'archivio o incompleti):
     {% for comune, mesi in anteprima.mesi_esclusi.items() %}{{ comune }} {{ mesi|join(', ') }}{% if not loop.last %} · {% endif %}{% endfor %}.</p>
   {% endif %}
-  {% if c.creato or c.aggiornato or c.cancellato %}
+  {% set ci = anteprima.indicatori or {} %}
+  {% if c.creato or c.aggiornato or c.cancellato or ci.creato or ci.aggiornato or ci.cancellato %}
   <form method="post" action="/pagine/invio-wms/invia"
         onsubmit="if(!confirm('Scrivere in WMS SmartH2O {{ c.creato }} righe nuove, {{ c.aggiornato }} aggiornate e cancellarne {{ c.cancellato or 0 }}?'))return false;this.querySelector('button').disabled=true;this.querySelector('button').textContent='Invio in corso…'">
     {% for comune in comuni_scelti %}<input type="hidden" name="comuni" value="{{ comune }}">{% endfor %}

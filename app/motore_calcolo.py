@@ -2085,13 +2085,13 @@ def elabora_dataframe(df_grezzo: pd.DataFrame, riassegnazioni: dict[str, str] | 
         warning.append(
             "Distretti soppressi uniti al distretto nuovo: "
             + ", ".join(f"{vecchio} -> {DISTRETTI_FUSI[vecchio]} ({n} righe)" for vecchio, n in sorted(spostate.items()))
-            + ". Neta non ha ancora aggiornato il CRM: vedi il tab Prese per il file da mandare."
+            + ". Neta non ha ancora aggiornato il CRM: vedi il tab Punti di erogazione per il file da mandare."
         )
 
     df_grezzo, originali = applica_riassegnazioni(df_grezzo, riassegnazioni or {})
     if originali:
         warning.append(
-            f"{len(originali)} servizi con il distretto corretto dalle conferme del tab Prese, anche per i mesi "
+            f"{len(originali)} servizi con il distretto corretto dalle conferme del tab Punti di erogazione, anche per i mesi "
             "passati: vedi il prospetto dei volumi spostati. Le letture in archivio restano come le ha scritte Neta."
         )
 

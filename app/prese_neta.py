@@ -77,7 +77,7 @@ def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int,
             PRIMO_INVIO=[(prima.get(k, (0, ""))[1] or "")[:10] for k in p["CHIAVE"]],
         ))
     if not parti:
-        raise ValueError("Niente da inviare: nessuna presa aperta per questi comuni.")
+        raise ValueError("Niente da inviare: nessun punto di erogazione aperto per questi comuni.")
     df = pd.concat(parti, ignore_index=True)
     adesso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with database.connessione() as conn:
@@ -93,10 +93,10 @@ def registra_invio(tipo: str, comuni: list[str], utente: str) -> tuple[int, int,
         )
         conn.commit()
 
-    df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
+    df["DP"] = np.where(df["DP"] == "", "(servizio senza DP)", df["DP"])
     df["INVIATA_PRIMA"] = [f"{n} volte, la prima il {d}" if n else "" for n, d in zip(df["N_PRIMA"], df["PRIMO_INVIO"])]
     comuni_col = {
-        "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
+        "COMUNE": "Comune", "DP": "Punto di erogazione (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
     }
     if tipo == "distretti":
@@ -158,7 +158,7 @@ def _aperte_in_memoria(tipo: str, comune: str) -> list[str]:
 # "distretto dall'indirizzo"; il distretto confermato si chiama "Distretto
 # corretto" ed e' la terza colonna, quello di Neta "Vecchio distretto".
 COLONNE_NETA_DISTRETTI = {
-    "COMUNE": "Comune", "DP": "Presa (DP)", "CONFERMATO": "Distretto corretto", "DISTRETTO": "Vecchio distretto",
+    "COMUNE": "Comune", "DP": "Punto di erogazione (DP)", "CONFERMATO": "Distretto corretto", "DISTRETTO": "Vecchio distretto",
     "INDIRIZZO": "Indirizzo", "CAP": "CAP", "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
     "MOTIVO_TESTO": "Motivo", "ORIGINE_TESTO": "Origine", "NOTA": "Nota",
     "PROPOSTA_DA": "Proposto da", "FONTI": "Fonti",
@@ -181,7 +181,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         p = p.assign(COMUNE=comune)
         parti.append(p)
     colonne = {
-        "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
+        "COMUNE": "Comune", "DP": "Punto di erogazione (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi",
         "DISTRETTO": "Distretto attuale", "MOTIVO_TESTO": "Motivo",
         "CONFERMATO": "Distretto da assegnare", "ORIGINE_TESTO": "Origine", "NOTA": "Nota", "STATO": "Stato",
@@ -192,7 +192,7 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
     }
     if parti:
         df = pd.concat(parti, ignore_index=True)
-        df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
+        df["DP"] = np.where(df["DP"] == "", "(servizio senza DP)", df["DP"])
         df["MOTIVO_TESTO"] = df["MOTIVO"].map(MOTIVI).fillna("")
         df["ORIGINE_TESTO"] = df["ORIGINE"].map(ORIGINI).fillna("")
         df["STATO"] = np.where(
@@ -214,8 +214,8 @@ def esporta_excel(comuni: list[str], solo_confermate: bool) -> bytes:
         df = pd.DataFrame(columns=list(colonne.values()))
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Prese")
-        foglio = writer.sheets["Prese"]
+        df.to_excel(writer, index=False, sheet_name="Punti di erogazione")
+        foglio = writer.sheets["Punti di erogazione"]
         for i, col in enumerate(df.columns, start=1):
             larghezza = min(60, max(10, len(col) + 2, *(len(str(v)) + 2 for v in df[col].head(500))))
             foglio.column_dimensions[foglio.cell(row=1, column=i).column_letter].width = larghezza

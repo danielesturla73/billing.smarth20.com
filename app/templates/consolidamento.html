@@ -5,7 +5,7 @@
 <p class="nota-metodologica">
   A fine anno il bilancio si <strong>consolida</strong>: l'app salva una copia fissa dei volumi fatturati per
   distretto e mese (Import_WMS) di tutti i comuni. Da quel momento, per i mesi di quell'anno, l'app e l'invio a WMS
-  SmartH2O usano <strong>sempre la copia</strong>, anche se poi arrivano letture nuove o si confermano prese nel tab Prese.
+  SmartH2O usano <strong>sempre la copia</strong>, anche se poi arrivano letture nuove o si confermano punti di erogazione nel tab Punti di erogazione.
   <strong>Indietro non si torna</strong>: un anno consolidato non si può rifare né annullare. Il ricalcolo di oggi si vede
   qui sotto solo per confronto, per capire quanto il consolidato si è discostato.
 </p>
@@ -54,7 +54,7 @@
     <button type="submit" class="btn-primario">Consolida</button>
   </form>
   <p class="nota-metodologica" style="margin-top:8px">Prima di consolidare: carica tutte le estrazioni che coprono l'anno e
-    conferma le prese che vuoi far entrare nel bilancio. Un mese ancora con stime provvisorie resta com'è nella copia.</p>
+    conferma i punti di erogazione che vuoi far entrare nel bilancio. Un mese ancora con stime provvisorie resta com'è nella copia.</p>
   {% else %}
   <p class="testo-tenue">Nessun anno da consolidare.</p>
   {% endif %}

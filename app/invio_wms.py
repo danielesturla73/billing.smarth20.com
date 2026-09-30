@@ -40,7 +40,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from app import database, motore_calcolo
+from app import database, motore_calcolo, prese as prese_mod
 
 TIMEOUT_S = 120
 # Provvisorio solo se le stime non ancora chiuse pesano piu' del 2% del
@@ -143,9 +143,126 @@ def prepara(risultati: list[tuple[str, object]], comuni_scelti: list[str], mesi_
             "note": "; ".join(parti) or None,
         })
     comuni = sorted({c for s in somme.values() for c in s["comuni"]} | (scelti & set(per_comune)))
-    firma = hashlib.sha256(json.dumps(righe, sort_keys=True).encode()).hexdigest()[:16]
-    return {"righe": righe, "distretti_ambito": sorted(ambito), "comuni": comuni, "firma": firma,
-            "mesi_esclusi": mesi_esclusi}
+    mesi_validi = {c: {x["mese"] for x in parti} for c, parti in per_comune.items()}
+    indicatori = _indicatori(risultati, scelti, ambito, mesi_validi)
+    firma = hashlib.sha256(json.dumps([righe, indicatori], sort_keys=True).encode()).hexdigest()[:16]
+    return {"righe": righe, "indicatori": indicatori, "distretti_ambito": sorted(ambito), "comuni": comuni,
+            "firma": firma, "mesi_esclusi": mesi_esclusi}
+
+
+# Classi d'uso di Neta (prefisso di PRODOTTO_CODICE) in tre gruppi per WMS
+# (Daniele, 29/09/2026: l'industriale da solo pesa il 3%, conta di piu'
+# domestico / non domestico / pubblico, soprattutto per il consumo notturno
+# lecito). I pozzi a parte: acqua di pozzo privato, non della rete.
+GRUPPI_CLASSE = {
+    "DOM_RES": "domestico", "DOM_NO_RES": "domestico", "CONDOMINIO": "domestico",
+    "ART_COMM": "non_domestico", "INDUSTRIALE": "non_domestico", "AGR_ZOOT": "non_domestico",
+    "PUBBLICO_DIS": "pubblico", "PUBBLICO_NO_DIS": "pubblico",
+}
+NOMI_MENSILI = ["fatturato_domestico_mc", "fatturato_non_domestico_mc", "fatturato_pubblico_mc",
+                "fatturato_pozzi_mc", "fatturato_altro_mc", "fatturato_fuori_distretto_mc"]
+
+
+def _gruppo_classe(classe: str) -> str:
+    codice = str(classe).split("-")[0].strip().upper()
+    if codice.startswith("POZ"):
+        return "pozzi"
+    return GRUPPI_CLASSE.get(codice, "altro")
+
+
+def _dp_comune(comune: str) -> tuple[dict[str, dict], str]:
+    """{distretto: {dp, utenze}} delle utenze attive del comune (ultima
+    estrazione, distretto confermato nel tab Prese se c'e'), e la data
+    dell'ultima estrazione. Punti di erogazione = DP distinti (DP = delivery
+    point, un contatore: NON la presa/allaccio, che in Neta non ha un codice —
+    Daniele, 29/09/2026; il servizio da solo se il DP
+    manca o e' il segnaposto), come nel tab Prese; attive = stato non
+    cessato (CFAT, CNFA). Stessa classificazione dei volumi
+    (motore_calcolo.classifica_distretto, per comune): i DP NO DISTRETTO
+    vanno sotto la chiave "NODMA", quelli con distretto mancante o di un
+    altro comune non associabile sotto "ND" (Daniele, 29/09/2026: anche in
+    WMS i DP non distrettualizzati stanno per comune, zona NODMA)."""
+    with database.connessione() as conn:
+        s = pd.read_sql("SELECT CODICE_SERVIZIO, DP, DISTRETTO, STATO_SERVIZIO, DATA_ESTRAZIONE, LOCALITA FROM anagrafica_servizi "
+                        "WHERE LOCALITA = ?", conn, params=(comune.strip().upper(),))
+        # Contatori FIGLIO (sotto-contatori a valle di un PADRE, legame
+        # dell'ultima lettura): non sono punti di erogazione dalla rete e nei
+        # volumi sono gia' esclusi; restano tra le utenze (Daniele, 29/09/2026).
+        legami = pd.read_sql(
+            "SELECT CAST(CODICE_SERVIZIO AS TEXT) AS C, LEGAMI_FORNITURA AS L FROM letture WHERE LOCALITA = ? "
+            "ORDER BY DATA_LETTURA", conn, params=(comune.strip().upper(),)) if database.tabella_esiste(conn) else pd.DataFrame(columns=["C", "L"])
+    ultimi = legami.drop_duplicates("C", keep="last")
+    figli = set(ultimi.loc[ultimi["L"] == motore_calcolo.LEGAME_FIGLIO, "C"].str.replace(r"\.0$", "", regex=True))
+    if s.empty:
+        return {}, ""
+    riass = prese_mod.riassegnazioni_calcolo(comune)
+    distretto = s["CODICE_SERVIZIO"].map(riass).fillna(s["DISTRETTO"]).fillna("").astype(str).str.strip().str.upper()
+    s["D"] = distretto.map(lambda d: motore_calcolo.DISTRETTI_FUSI.get(d, d))
+    s = s[~s["STATO_SERVIZIO"].fillna("").astype(str).str.upper().str.startswith("C")].copy()
+    if s.empty:
+        return {}, ""
+    categoria = motore_calcolo.classifica_distretto(s.assign(DISTRETTO=s["D"]))["CATEGORIA_DISTRETTO"]
+    s["D"] = s["D"].where(categoria == "valido", categoria.map({"case_sparse": "NODMA", "anomalia": "ND"}))
+    s["CHIAVE"] = [f"S{c}" if (not dp or dp == prese_mod.DP_SEGNAPOSTO) else dp
+                   for c, dp in zip(s["CODICE_SERVIZIO"], s["DP"].fillna(""))]
+    s["CHIAVE_DP"] = s["CHIAVE"].where(~s["CODICE_SERVIZIO"].isin(figli))  # NaN = figlio, non conta come DP
+    g = s.groupby("D").agg(dp=("CHIAVE_DP", "nunique"), utenze=("CODICE_SERVIZIO", "count"))
+    data = str(pd.to_datetime(s["DATA_ESTRAZIONE"]).max().date()) if not s.empty else ""
+    return {d: {"dp": int(r.dp), "utenze": int(r.utenze)} for d, r in g.iterrows()}, data
+
+
+def _indicatori(risultati, scelti: set[str], ambito: set[str], mesi_validi: dict[str, set[str]]) -> list[dict]:
+    """Indicatori per WMS (tabella district_indicatori): punti di erogazione
+    (DP) e utenze attive per distretto — mai come "prese": l'UARL di WMS vuole
+    gli allacci fisici, che sono molti meno e che Neta non ha —, fatturato mensile per
+    gruppo di classe d'uso, e per comune il volume fuori distretto (NODMA =
+    case sparse, ND = distretto anomalo o mancante). Stessi mesi dell'invio;
+    i distretti in piu' comuni sommati su tutti i comuni."""
+    uscita = []
+    conteggi: dict[str, dict] = {}
+    data_prese = ""
+    classi: dict[tuple[str, str, str], float] = {}
+    for comune, r in risultati:
+        validi = mesi_validi.get(comune, set())
+        per_distretto, data = _dp_comune(comune)
+        data_prese = max(data_prese, data)
+        if comune.strip().upper() in scelti and data:
+            for zona in ("NODMA", "ND"):
+                v = per_distretto.get(zona, {"dp": 0, "utenze": 0})
+                uscita.append({"comune": comune, "codice_zona": zona, "data": data,
+                               "nome": f"punti_erogazione_{zona.lower()}", "valore": v["dp"], "unita": "n"})
+        for d, v in per_distretto.items():
+            if d in ambito:
+                acc = conteggi.setdefault(d, {"dp": 0, "utenze": 0})
+                acc["dp"] += v["dp"]
+                acc["utenze"] += v["utenze"]
+        c = r.volumi_distretto_mese_classe
+        if c is not None and not c.empty:
+            for mese, codice, classe, vol in zip(c["Mese"].astype(str).str[:7], c["Codice Distretto"].astype(str),
+                                                 c["Classe d'uso"], c["Volume (m3)"]):
+                codice = codice.strip().upper()
+                if codice in ambito and mese in validi:
+                    k = (codice, mese, _gruppo_classe(classe))
+                    classi[k] = classi.get(k, 0.0) + float(vol or 0)
+        if comune.strip().upper() in scelti and r.volumi_comune_mese is not None and not r.volumi_comune_mese.empty:
+            vc = r.volumi_comune_mese
+            for mese, sparse, anomalo in zip(vc["Mese"].astype(str).str[:7], vc["Volume Case Sparse (m3)"],
+                                             vc["Volume Distretto Anomalo/Mancante (m3)"]):
+                if mese not in validi:
+                    continue
+                for zona, vol in (("NODMA", sparse), ("ND", anomalo)):
+                    uscita.append({"comune": comune, "codice_zona": zona, "data": f"{mese}-01",
+                                   "nome": "fatturato_fuori_distretto_mc", "valore": round(float(vol or 0), 2), "unita": "m3"})
+    if data_prese:
+        for d, v in sorted(conteggi.items()):
+            uscita.append({"comune": None, "codice_zona": d, "data": data_prese, "nome": "punti_erogazione",
+                           "valore": v["dp"], "unita": "n"})
+            uscita.append({"comune": None, "codice_zona": d, "data": data_prese, "nome": "utenze_attive",
+                           "valore": v["utenze"], "unita": "n"})
+    for (codice, mese, gruppo), vol in sorted(classi.items()):
+        uscita.append({"comune": None, "codice_zona": codice, "data": f"{mese}-01", "nome": f"fatturato_{gruppo}_mc",
+                       "valore": round(vol, 2), "unita": "m3"})
+    return uscita
 
 
 def configurato() -> bool:
@@ -159,7 +276,8 @@ def chiama_wms(dati: dict, prova: bool, utente: str) -> dict:
         raise ValueError("WMS_API_URL o INTERNAL_API_TOKEN mancanti nel .env del container billing.")
     url = os.environ["WMS_API_URL"].rstrip("/") + "/api/v1/billed/import"
     corpo = json.dumps({"prova": prova, "utente": utente, "distretti_ambito": dati["distretti_ambito"],
-                        "cancella_non_inviate": True, "righe": dati["righe"]}).encode()
+                        "cancella_non_inviate": True, "righe": dati["righe"],
+                        "indicatori": dati.get("indicatori", [])}).encode()
     richiesta = urllib.request.Request(url, data=corpo, method="POST", headers={
         "Content-Type": "application/json", "X-Internal-Token": os.environ["INTERNAL_API_TOKEN"]})
     try:

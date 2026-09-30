@@ -706,6 +706,7 @@ async def invio_wms_anteprima(request: Request):
         return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, comuni, str(exc)))
     anteprima = {**invio_wms.riassunto_anteprima(esito), "conteggi": esito["conteggi"], "firma": dati["firma"],
                  "mesi_esclusi": dati["mesi_esclusi"],
+                 "indicatori": esito.get("conteggi_indicatori"),
                  "n_righe": len(dati["righe"]), "n_provvisorie": sum(r["provvisorio"] for r in dati["righe"])}
     return templates.TemplateResponse(request, "invio_wms.html", _contesto_invio_wms(request, comuni, anteprima=anteprima))
 
@@ -732,7 +733,8 @@ async def invio_wms_invia(request: Request):
                   f"{c.get('cancellato', 0)} cancellate",
                   accessi.ip_client(request))
     return templates.TemplateResponse(request, "invio_wms.html",
-                                      _contesto_invio_wms(request, comuni, esito={"id": id_invio, "conteggi": c}))
+                                      _contesto_invio_wms(request, comuni, esito={"id": id_invio, "conteggi": c,
+                                                                                  "indicatori": esito.get("conteggi_indicatori")}))
 
 
 # Aggiornamento dei dati di riferimento esterni dalla pagina Amministrazione
@@ -1808,7 +1810,7 @@ async def prese_assegna(request: Request):
             for v in corpo.get("voci", [])]
     voci = [v for v in voci if v["chiave"]]
     if not comune or not voci:
-        raise HTTPException(status_code=400, detail="Comune o prese mancanti.")
+        raise HTTPException(status_code=400, detail="Comune o punti di erogazione mancanti.")
     try:
         salvate, tolte = prese.salva_assegnazioni(comune, voci, request.state.utente["username"])
     except ValueError as exc:
@@ -1866,7 +1868,7 @@ async def prese_invio(request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
     auth.registra(
         request.state.utente["username"], "prese_invio_neta",
-        f"invio {id_invio}, {tipo}, {comune or 'tutti i comuni'}: {n} prese", accessi.ip_client(request),
+        f"invio {id_invio}, {tipo}, {comune or 'tutti i comuni'}: {n} punti di erogazione", accessi.ip_client(request),
     )
     nome = f"neta_{tipo}_{comune.replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}_invio{id_invio}.xlsx"
     return Response(

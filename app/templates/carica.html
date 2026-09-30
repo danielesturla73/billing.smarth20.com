@@ -23,19 +23,19 @@
   </div>
   {% for f in esito.file if f.controllo_prese %}{% set c = f.controllo_prese %}
   {% if c.saltato %}
-  <div class="avviso" style="margin-top:12px">{{ f.comune }} — controllo prese: {{ c.saltato }}.</div>
+  <div class="avviso" style="margin-top:12px">{{ f.comune }} — controllo punti di erogazione: {{ c.saltato }}.</div>
   {% elif c.differenze %}
   <div class="avviso" style="margin-top:12px">
-    <strong>{{ f.comune }}</strong> — controllo prese: {{ c.differenze }} prese diverse tra Neta e quello che abbiamo noi
-    (su {{ c.n_prese }}): {{ c.conteggi.NON_RECEPITA }} confermate non ancora recepite da Neta,
-    {{ c.conteggi.MANTIENI_CAMBIATA }} "mantieni attuale" cambiate da Neta,
-    {{ c.conteggi.CAMBIATA }} cambiate da Neta, {{ c.conteggi.NUOVA }} nuove.
+    <strong>{{ f.comune }}</strong> — controllo punti di erogazione (DP): {{ c.differenze }} DP diversi tra Neta e quello che abbiamo noi
+    (su {{ c.n_prese }}): {{ c.conteggi.NON_RECEPITA }} confermati non ancora recepiti da Neta,
+    {{ c.conteggi.MANTIENI_CAMBIATA }} "mantieni attuale" cambiati da Neta,
+    {{ c.conteggi.CAMBIATA }} cambiati da Neta, {{ c.conteggi.NUOVA }} nuovi.
     {% if c.conteggi.RECEPITA %}{{ c.conteggi.RECEPITA }} conferme recepite con questa estrazione.{% endif %}
     <a href="/prese/controllo/{{ c.id }}">Scarica l'elenco (Excel)</a>
   </div>
   {% else %}
   <div class="esito-ok" style="margin-top:12px">
-    <strong>{{ f.comune }}</strong> — controllo prese: nessuna differenza tra Neta e quello che abbiamo noi (su {{ c.n_prese }} prese).
+    <strong>{{ f.comune }}</strong> — controllo punti di erogazione (DP): nessuna differenza tra Neta e quello che abbiamo noi (su {{ c.n_prese }} DP).
     {% if c.conteggi.RECEPITA %}{{ c.conteggi.RECEPITA }} conferme recepite con questa estrazione
     (<a href="/prese/controllo/{{ c.id }}">elenco</a>).{% endif %}
   </div>
@@ -88,20 +88,21 @@
 </div>
 
 <div class="panel">
-  <h2>Controllo prese ai caricamenti (orari UTC)</h2>
+  <h2>Controllo punti di erogazione (DP) ai caricamenti (orari UTC)</h2>
   <p class="nota-metodologica" style="margin-top:0">
-    A ogni estrazione caricata, presa per presa: il distretto scritto da Neta confrontato con quello che abbiamo noi
-    (la conferma del tab Prese, oppure quello dell'estrazione precedente). A tendere va a zero, a parte le prese nuove.
+    A ogni estrazione caricata, punto di erogazione per punto di erogazione (DP): il distretto scritto da Neta confrontato con
+    quello che abbiamo noi (la conferma del tab Punti di erogazione, oppure quello dell'estrazione precedente). A tendere va a
+    zero, a parte i DP nuovi.
     Non cambia i calcoli: è solo un controllo.
   </p>
   <div class="table-scroll">
   <table>
-    <thead><tr><th>Quando</th><th>Comune</th><th>File</th><th class="num">Prese</th>
-      <th class="num" title="{{ stati_prese.NON_RECEPITA }}">Confermate non recepite</th>
-      <th class="num" title="{{ stati_prese.MANTIENI_CAMBIATA }}">"Mantieni" cambiate</th>
-      <th class="num" title="{{ stati_prese.CAMBIATA }}">Cambiate da Neta</th>
-      <th class="num" title="{{ stati_prese.NUOVA }}">Nuove</th>
-      <th class="num" title="{{ stati_prese.RECEPITA }}">Recepite</th><th></th></tr></thead>
+    <thead><tr><th>Quando</th><th>Comune</th><th>File</th><th class="num">DP</th>
+      <th class="num" title="{{ stati_prese.NON_RECEPITA }}">Confermati non recepiti</th>
+      <th class="num" title="{{ stati_prese.MANTIENI_CAMBIATA }}">"Mantieni" cambiati</th>
+      <th class="num" title="{{ stati_prese.CAMBIATA }}">Cambiati da Neta</th>
+      <th class="num" title="{{ stati_prese.NUOVA }}">Nuovi</th>
+      <th class="num" title="{{ stati_prese.RECEPITA }}">Recepiti</th><th></th></tr></thead>
     <tbody>
     {% for r in controlli_prese %}
     <tr><td style="white-space:nowrap">{{ r.quando }}</td><td>{{ r.comune }}</td><td>{{ r.file }}</td>

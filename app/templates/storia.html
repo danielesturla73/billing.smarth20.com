@@ -6,6 +6,11 @@
   Cronologia di come è nata e cresciuta questa applicazione — utile per ritrovare velocemente perché un
   numero è cambiato da una sessione all'altra, senza dover leggere i commit git uno per uno.
 </p>
+<p class="nota-metodologica">
+  Fino al 29/09/2026 l'app chiamava <strong>"prese"</strong> quelli che sono i <strong>punti di erogazione (DP)</strong> di Neta,
+  cioè i contatori. Le voci più vecchie qui sotto usano ancora la parola di allora: dove leggi "presa", intendi "punto di
+  erogazione (DP)".
+</p>
 
 <div class="panel storia-voce">
   <div class="data">17/09/2026</div>
@@ -235,16 +240,16 @@
 </div>
 <div class="panel storia-voce">
   <div class="data">29/09/2026</div>
-  <h2>Controllo prese a ogni caricamento</h2>
-  <p>A ogni estrazione caricata, presa per presa, il distretto scritto da Neta viene confrontato con quello che abbiamo
-    noi (la conferma del tab Prese, oppure il distretto dell'estrazione precedente). L'esito compare subito sotto il
-    caricamento, con l'elenco in Excel, e resta nella tabella <em>Controllo prese ai caricamenti</em> della pagina Carica,
-    per vedere l'andamento: a tendere va a zero, a parte le prese nuove. Non cambia i calcoli.</p>
+  <h2>Controllo dei punti di erogazione a ogni caricamento</h2>
+  <p>A ogni estrazione caricata, DP per DP, il distretto scritto da Neta viene confrontato con quello che abbiamo
+    noi (la conferma del tab Punti di erogazione, oppure il distretto dell'estrazione precedente). L'esito compare subito
+    sotto il caricamento, con l'elenco in Excel, e resta nella tabella <em>Controllo punti di erogazione (DP) ai
+    caricamenti</em> della pagina Carica, per vedere l'andamento: a tendere va a zero, a parte i DP nuovi. Non cambia i calcoli.</p>
   <ul>
-    <li><strong>Confermate non recepite</strong>: confermate da noi, Neta ha ancora un altro distretto.</li>
-    <li><strong>"Mantieni" cambiate</strong>, <strong>cambiate da Neta</strong>, <strong>nuove</strong>, e le
-      <strong>recepite</strong> (Neta ha messo il distretto confermato).</li>
-    <li>Prima prova, sull'ultima estrazione di Belgioioso: le 9 prese confermate non ancora corrette da Neta.</li>
+    <li><strong>Confermati non recepiti</strong>: confermati da noi, Neta ha ancora un altro distretto.</li>
+    <li><strong>"Mantieni" cambiati</strong>, <strong>cambiati da Neta</strong>, <strong>nuovi</strong>, e i
+      <strong>recepiti</strong> (Neta ha messo il distretto confermato).</li>
+    <li>Prima prova, sull'ultima estrazione di Belgioioso: i 9 punti di erogazione confermati non ancora corretti da Neta.</li>
   </ul>
 </div>
 <div class="panel storia-voce">
@@ -254,7 +259,7 @@
     (tabella <code>district_billed</code>) con un clic, dopo un'anteprima che non scrive niente. Resta un'azione manuale,
     niente invii automatici.</p>
   <ul>
-    <li><strong>Si mandano tutti i mesi ogni volta</strong>: le conferme del tab Prese valgono anche sul passato, quindi al
+    <li><strong>Si mandano tutti i mesi ogni volta</strong>: le conferme del tab Punti di erogazione valgono anche sul passato, quindi al
       primo invio dopo una conferma WMS riceve corretti anche i mesi già inviati (tranne gli anni consolidati).</li>
     <li><strong>Non si mandano</strong> il trimestre di apertura dell'archivio di ogni comune né i mesi incompleti (di solito
       l'ultimo): Belgioioso era arrivato con luglio/agosto 2025 e giugno 2026 bassissimi. Le righe di questi mesi già in
@@ -270,5 +275,21 @@
     bastava conoscere l'indirizzo), nuova scheda <strong>Fatturato</strong> con i grafici mese per mese per comune e per
     distretto, e il <strong>Bilancio manuale</strong> usa la media dei mesi inviati da qui (se un distretto non ne ha, il
     consumo annuo 2025 diviso 12), con una nota che dice quale.</p>
+</div>
+<div class="panel storia-voce">
+  <div class="data">29/09/2026</div>
+  <h2>"Prese" diventa "Punti di erogazione (DP)"</h2>
+  <p>La colonna DP di Neta è il <strong>punto di erogazione</strong> (<em>delivery point</em>), cioè il contatore di un'utenza,
+    non la presa. Verificato su tutte le estrazioni 2025-2026 di tutti i comuni: ogni DP ha sempre una sola utenza attiva.
+    La presa è l'allaccio fisico alla rete e può servire più DP (un condominio): in Neta ha un suo codice, che arriverà a parte.</p>
+  <ul>
+    <li>Il tab, la guida, la pagina Carica, i messaggi e gli Excel per Neta ora dicono "punto di erogazione (DP)". La logica
+      non cambia: il distretto resta legato al DP, che non cambia mai, e le conferme già fatte restano valide.</li>
+    <li>Gli indirizzi delle pagine (per esempio <code>/pagine/prese</code>) restano gli stessi, così i segnalibri funzionano.</li>
+    <li>L'introduzione del tab diceva ancora che le conferme "non cambiano i volumi": corretto, dal 26/09 entrano subito nel
+      calcolo, anche nel passato.</li>
+    <li>A WMS il numero dei DP arriva come <em>punti di erogazione</em>, mai come "prese": il minimo notturno di WMS (UARL)
+      vuole gli allacci veri.</li>
+  </ul>
 </div>
 {% endblock %}

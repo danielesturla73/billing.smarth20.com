@@ -73,7 +73,7 @@
     <li><strong>Prima l'anteprima</strong>, che non scrive niente: righe nuove, aggiornate (con il valore che c'era in WMS),
       invariate, scartate (distretto che WMS non conosce) e da cancellare. Poi <strong>Invia</strong>.</li>
     <li><strong>Ogni volta tutti i mesi</strong>: WMS aggiorna solo quelli cambiati. Così i mesi provvisori e quelli toccati
-      dalle conferme del tab Prese si correggono da soli al primo invio.</li>
+      dalle conferme del tab Punti di erogazione si correggono da soli al primo invio.</li>
     <li><strong>Mesi esclusi</strong>: il trimestre di apertura dell'archivio di ogni comune (volumi parziali, manca il
       consumo prima della prima lettura, non si correggono mai) e i mesi incompleti, di solito l'ultimo, le cui letture
       non sono ancora arrivate (volume sotto il 70% dei mesi prima). L'anteprima li elenca comune per comune. Le righe di
@@ -95,33 +95,35 @@
   <p>Alcuni distretti sono stati fusi in altri e non esistono più in WMS SmartH2O: <strong>DVH02 e DVH03 → DVH05</strong>
     (Voghera), <strong>DCT04 e DCT07 → DCT13</strong> (Casteggio). Finché Neta non corregge il gestionale le estrazioni
     li riportano ancora: il calcolo li unisce in automatico al distretto nuovo, anche per i mesi passati, così
-    Import_WMS ha solo codici attuali. I totali del comune non cambiano. Nel tab Prese queste prese compaiono come
-    "Distretto soppresso", già associate al distretto nuovo, e finiscono nel file per Neta.</p>
+    Import_WMS ha solo codici attuali. I totali del comune non cambiano. Nel tab Punti di erogazione questi DP compaiono come
+    "Distretto soppresso", già associati al distretto nuovo, e finiscono nel file per Neta.</p>
 </div>
 
 <div class="panel" id="guida-prese">
-  <h2>Guida al tab Prese, per chi inizia</h2>
-  <p>Questa parte spiega il tab <a href="/pagine/prese">Prese</a> a chi non conosce l'argomento. I dettagli tecnici sono
+  <h2>Guida al tab Punti di erogazione, per chi inizia</h2>
+  <p>Questa parte spiega il tab <a href="/pagine/prese">Punti di erogazione</a> a chi non conosce l'argomento. I dettagli tecnici sono
     nei riquadri successivi.</p>
 
   <h3>Le parole che servono</h3>
   <ul>
-    <li><strong>Presa</strong>: il punto fisico in cui l'acquedotto entra in un edificio (in Neta la colonna DP). Non
-      cambia mai.</li>
-    <li><strong>Servizio</strong> (o utenza): il contratto collegato alla presa. Può cambiare nel tempo (nuovo
-      inquilino, nuovo contratto) e una presa può averne più d'uno (un condominio).</li>
+    <li><strong>Punto di erogazione (DP)</strong>: il punto in cui l'acqua viene consegnata a un'utenza, cioè il suo
+      contatore (in Neta la colonna DP, <em>delivery point</em>). Non cambia mai: cambia solo l'utenza collegata.</li>
+    <li><strong>Servizio</strong> (o utenza): il contratto collegato al punto di erogazione. Può cambiare nel tempo (nuovo
+      inquilino, nuovo contratto), ma un DP ha una sola utenza attiva alla volta.</li>
+    <li><strong>Presa</strong>: l'allaccio fisico alla rete, che può servire più punti di erogazione (per esempio un
+      condominio). È un'altra cosa rispetto al DP: in Neta ha un suo codice, che l'app per ora non usa.</li>
     <li><strong>Distretto</strong>: una zona della rete idrica, con un codice come DBLG02 o DCT05. Per ogni distretto si
-      confronta l'acqua immessa con quella fatturata: è così che si trovano le perdite. Per questo ogni presa deve
+      confronta l'acqua immessa con quella fatturata: è così che si trovano le perdite. Per questo ogni punto di erogazione deve
       stare nel distretto giusto.</li>
-    <li><strong>NO DISTRETTO</strong>: prese fuori da ogni distretto, per esempio case isolate in campagna. Non è
+    <li><strong>NO DISTRETTO</strong>: punti di erogazione fuori da ogni distretto, per esempio case isolate in campagna. Non è
       sempre un errore.</li>
-    <li><strong>Coordinata</strong>: latitudine e longitudine della presa, cioè dove si trova sulla mappa. Quelle di Neta
+    <li><strong>Coordinata</strong>: latitudine e longitudine del punto di erogazione, cioè dove si trova sulla mappa. Quelle di Neta
       sono spesso sbagliate, e Neta ha assegnato i distretti proprio in base a quelle coordinate.</li>
     <li><strong>Stradario</strong>: la tabella che dice in quale distretto sta ogni via, o ogni tratto di via.</li>
   </ul>
 
   <h3>Le fonti che l'app confronta</h3>
-  <p>Per capire in quale distretto deve stare una presa l'app non si fida di un solo dato: confronta fonti diverse e
+  <p>Per capire in quale distretto deve stare un punto di erogazione l'app non si fida di un solo dato: confronta fonti diverse e
     indipendenti tra loro.</p>
   <ul>
     <li><strong>civico ANNCSU</strong>: l'archivio ufficiale dei numeri civici (Agenzia delle Entrate e ISTAT), con la
@@ -146,61 +148,61 @@
     <li><strong>posizione DCT04 ✗</strong>: la coordinata di Neta invece cade in DCT04, e non concorda (✗). Qui il
       problema è la coordinata, non l'indirizzo.</li>
   </ul>
-  <p>Più fonti concordano, più la proposta è sicura. Se compare solo una fonte, le altre non erano disponibili per quella
-    presa (civico non posizionato, via non trovata…). Una ✗ non vuol dire che la proposta sia sbagliata: vuol dire che
+  <p>Più fonti concordano, più la proposta è sicura. Se compare solo una fonte, le altre non erano disponibili per quel
+    punto di erogazione (civico non posizionato, via non trovata…). Una ✗ non vuol dire che la proposta sia sbagliata: vuol dire che
     quella fonte dice un'altra cosa, ed è meglio guardare la mappa prima di confermare.</p>
 
-  <h3>Cosa fare, presa per presa</h3>
+  <h3>Cosa fare, punto di erogazione per punto di erogazione</h3>
   <ol>
-    <li>Clicca la presa nell'elenco: la mappa la mostra, con i confini dei distretti.</li>
-    <li>Leggi il <strong>motivo</strong> (perché è segnalata), la <strong>proposta</strong> e le
+    <li>Clicca il punto di erogazione nell'elenco: la mappa lo mostra, con i confini dei distretti.</li>
+    <li>Leggi il <strong>motivo</strong> (perché è segnalato), la <strong>proposta</strong> e le
       <strong>fonti</strong>.</li>
     <li>Scegli:
       <ul>
         <li><strong>Conferma</strong>: il distretto proposto (o uno che scegli tu) è quello giusto. Andrà a Neta;</li>
-        <li><strong>Mantieni attuale</strong>: la segnalazione è un falso allarme e il distretto che la presa ha già è
-          giusto. La presa è "validata" e non va a Neta;</li>
-        <li>non fare niente, se non sei sicuro: la presa resta da decidere.</li>
+        <li><strong>Mantieni attuale</strong>: la segnalazione è un falso allarme e il distretto che il DP ha già è
+          giusto. Il DP è "validato" e non va a Neta;</li>
+        <li>non fare niente, se non sei sicuro: il DP resta da decidere.</li>
       </ul></li>
-    <li><strong>Conferma le proposte sicure</strong> conferma in un colpo solo le prese su cui almeno due fonti sono
+    <li><strong>Conferma le proposte sicure</strong> conferma in un colpo solo i DP su cui almeno due fonti sono
       disponibili e concordano tutte.</li>
-    <li>Quando hai finito, dalla pagina Prese usa <strong>Registra invio</strong>: scarica il file per Neta e se lo segna,
+    <li>Quando hai finito, dalla pagina Punti di erogazione usa <strong>Registra invio</strong>: scarica il file per Neta e se lo segna,
       per sapere poi cosa Neta ha sistemato e cosa sollecitare.</li>
   </ol>
-  <h3>Spostare prese a mano o per zona</h3>
-  <p>Nella vista <strong>Mappa prese</strong> puoi spostare anche prese che l'app non segnala:</p>
+  <h3>Spostare punti di erogazione a mano o per zona</h3>
+  <p>Nella vista <strong>Mappa punti di erogazione</strong> puoi spostare anche DP che l'app non segnala:</p>
   <ul>
-    <li><strong>una presa</strong>: cliccala, scegli il distretto, scrivi una nota (il perché) e premi <em>Sposta</em>;</li>
+    <li><strong>un punto di erogazione</strong>: cliccalo, scegli il distretto, scrivi una nota (il perché) e premi <em>Sposta</em>;</li>
     <li><strong>una zona</strong>: premi <em>Seleziona zona</em>, clicca sulla mappa per disegnare l'area (almeno 3 punti), poi
-      <em>chiudi la zona</em>. Compare l'elenco delle prese dentro, con il loro distretto di oggi; scegli il distretto di
-      destinazione, scrivi la nota (obbligatoria) e premi <em>Sposta le prese</em>.</li>
+      <em>chiudi la zona</em>. Compare l'elenco dei punti di erogazione dentro, con il loro distretto di oggi; scegli il distretto di
+      destinazione, scrivi la nota (obbligatoria) e premi <em>Sposta i punti di erogazione</em>.</li>
   </ul>
-  <p>Prima di spostare l'app avvisa se per qualche presa una fonte (civico, stradario, via OSM) dice un distretto diverso:
-    puoi spostarla lo stesso, ma lo fai sapendo cosa dicono le fonti. Gli spostamenti diventano conferme con l'origine
-    ("spostata a mano", "spostata con una zona") e la nota, e vanno nel file per Neta. Sulla mappa una presa confermata in un
+  <p>Prima di spostare l'app avvisa se per qualche DP una fonte (civico, stradario, via OSM) dice un distretto diverso:
+    puoi spostarlo lo stesso, ma lo fai sapendo cosa dicono le fonti. Gli spostamenti diventano conferme con l'origine
+    ("spostato a mano", "spostato con una zona") e la nota, e vanno nel file per Neta. Sulla mappa un DP confermato in un
     altro distretto ha il bordo spesso del colore del distretto di destinazione.</p>
 
   <h3>Le conferme cambiano i volumi, anche nel passato</h3>
-  <p>Una presa confermata porta il suo volume nel distretto confermato <strong>subito</strong>, senza aspettare Neta, e per
-    <strong>tutta la sua storia</strong>: la presa non si è mai spostata, era sbagliato il distretto scritto nel gestionale.
-    Le letture in archivio restano come le ha scritte Neta; cambia solo il calcolo. Le prese che erano NO DISTRETTO, * o
-    con il codice di un altro comune non erano in nessun distretto: confermandole quel volume si <em>recupera</em> nel
-    bilancio. Nella pagina Volumi di ogni comune il riquadro <em>Volumi spostati dalle conferme del tab Prese</em> dice
-    da quale distretto a quale, per quante prese e quanti m³. "Mantieni attuale" non cambia niente.</p>
+  <p>Un punto di erogazione confermato porta il suo volume nel distretto confermato <strong>subito</strong>, senza aspettare Neta, e per
+    <strong>tutta la sua storia</strong>: il DP non si è mai spostato, era sbagliato il distretto scritto nel gestionale.
+    Le letture in archivio restano come le ha scritte Neta; cambia solo il calcolo. I DP che erano NO DISTRETTO, * o
+    con il codice di un altro comune non erano in nessun distretto: confermandoli quel volume si <em>recupera</em> nel
+    bilancio. Nella pagina Volumi di ogni comune il riquadro <em>Volumi spostati dalle conferme del tab Punti di erogazione</em> dice
+    da quale distretto a quale, per quanti DP e quanti m³. "Mantieni attuale" non cambia niente.</p>
   <p>Fanno eccezione gli <strong>anni consolidati</strong> (vedi la pagina <a href="/pagine/consolidamento">Consolidamento</a>):
     a fine anno si salva una copia fissa del bilancio e da quel momento i mesi di quell'anno non cambiano più.</p>
 
   <h3>Quando si rifanno i calcoli</h3>
   <ul>
-    <li><strong>Quando confermi, togli o sposti una presa alla volta</strong>: l'app non ricalcola a ogni clic. Aspetta
+    <li><strong>Quando confermi, togli o sposti un punto di erogazione alla volta</strong>: l'app non ricalcola a ogni clic. Aspetta
       <strong>2 minuti dall'ultima conferma</strong> (ogni conferma nuova fa ripartire l'attesa), poi ricalcola una volta
-      sola, in background, i volumi e i conteggi <em>di quel comune</em>. Così puoi confermare tante prese di seguito senza
+      sola, in background, i volumi e i conteggi <em>di quel comune</em>. Così puoi confermare tanti DP di seguito senza
       rallentamenti.</li>
-    <li><strong>Quando confermi tante prese insieme</strong> (proposte sicure, una zona): il ricalcolo parte dopo pochi
+    <li><strong>Quando confermi tanti DP insieme</strong> (proposte sicure, una zona): il ricalcolo parte dopo pochi
       secondi, una volta sola.</li>
     <li>Se apri la pagina Volumi prima che il ricalcolo sia partito, i numeri vengono ricalcolati in quel momento (qualche
       secondo, Voghera circa 10): non vedi mai numeri vecchi.</li>
-    <li><strong>Quando carichi un'estrazione di Neta</strong>: si ricalcolano volumi, prese e coordinate di quel comune.</li>
+    <li><strong>Quando carichi un'estrazione di Neta</strong>: si ricalcolano volumi, punti di erogazione e coordinate di quel comune.</li>
     <li><strong>Quando cambiano i file di riferimento</strong> (confini, elenco distretti, stradario, civici ANNCSU, vie
       OSM): si ricalcola tutto, in background.</li>
     <li>Le conferme <strong>non</strong> cambiano il file delle coordinate da verificare, che dipende solo dalle coordinate
@@ -210,23 +212,23 @@
       Invio WMS: dopo una serie di conferme, fai un invio perché anche WMS abbia il passato corretto.</li>
   </ul>
 
-  <h3>Il controllo prese a ogni caricamento</h3>
-  <p>Quando carichi un'estrazione, l'app confronta presa per presa il distretto scritto da Neta con quello che abbiamo noi
-    e dice, sotto il caricamento, quante prese sono diverse, con l'elenco in Excel:</p>
+  <h3>Il controllo dei punti di erogazione a ogni caricamento</h3>
+  <p>Quando carichi un'estrazione, l'app confronta DP per DP il distretto scritto da Neta con quello che abbiamo noi
+    e dice, sotto il caricamento, quanti DP sono diversi, con l'elenco in Excel:</p>
   <ul>
-    <li><strong>Confermate non recepite</strong>: le hai confermate, ma Neta ha ancora un altro distretto. Scendono man mano
+    <li><strong>Confermati non recepiti</strong>: li hai confermati, ma Neta ha ancora un altro distretto. Scendono man mano
       che Neta sistema il gestionale.</li>
-    <li><strong>"Mantieni" cambiate</strong>: avevi detto "mantieni attuale", ma Neta ha cambiato distretto. Da guardare.</li>
-    <li><strong>Cambiate da Neta</strong>: prese mai confermate a cui Neta ha cambiato distretto rispetto all'estrazione prima.</li>
-    <li><strong>Nuove</strong>: prese mai viste. <strong>Recepite</strong>: Neta ha messo il distretto confermato.</li>
+    <li><strong>"Mantieni" cambiati</strong>: avevi detto "mantieni attuale", ma Neta ha cambiato distretto. Da guardare.</li>
+    <li><strong>Cambiati da Neta</strong>: DP mai confermati a cui Neta ha cambiato distretto rispetto all'estrazione prima.</li>
+    <li><strong>Nuovi</strong>: DP mai visti. <strong>Recepiti</strong>: Neta ha messo il distretto confermato.</li>
   </ul>
-  <p>È ridondante con il tab Prese, ma è un controllo: a tendere va a zero, a parte le prese nuove. Lo storico dei controlli
+  <p>È ridondante con il tab Punti di erogazione, ma è un controllo: a tendere va a zero, a parte i DP nuovi. Lo storico dei controlli
     è nella pagina Carica. Non si fa al primo caricamento di un comune né per un'estrazione più vecchia di quelle già
     caricate, e non cambia i calcoli.</p>
 
   <h3>Il file distretti per Neta</h3>
-  <p>Contiene solo le prese confermate e non ancora sistemate da Neta, già validate da chi le ha confermate. Le colonne
-    principali: <strong>Presa (DP)</strong>, <strong>Distretto corretto</strong> (quello da mettere), <strong>Vecchio
+  <p>Contiene solo i punti di erogazione confermati e non ancora sistemati da Neta, già validati da chi li ha confermati. Le colonne
+    principali: <strong>Punto di erogazione (DP)</strong>, <strong>Distretto corretto</strong> (quello da mettere), <strong>Vecchio
     distretto</strong> (quello di oggi), indirizzo e codici servizio, motivo, origine e nota, e le fonti su cui si basa la
     proposta.</p>
 
@@ -253,13 +255,13 @@
 </div>
 
 <div class="panel">
-  <h2>Prese e distretti: come funzionano i controlli</h2>
-  <p>Neta associa i distretti alle <strong>prese</strong> (colonna DP). Una presa non cambia mai: cambia solo l'utenza
-    collegata. Una presa che manca da un'estrazione non è sparita: è chiusa, senza utenza attiva. Il tab
-    <a href="/pagine/prese">Prese</a> segnala le prese da sistemare. Le conferme finiscono nel file per Neta e
-    <strong>non cambiano i volumi</strong>.</p>
+  <h2>Punti di erogazione e distretti: come funzionano i controlli</h2>
+  <p>Neta associa i distretti ai <strong>punti di erogazione</strong> (colonna DP, <em>delivery point</em>: il contatore,
+    non la presa). Un DP non cambia mai: cambia solo l'utenza collegata. Un DP che manca da un'estrazione non è sparito:
+    è chiuso, senza utenza attiva. Il tab <a href="/pagine/prese">Punti di erogazione</a> segnala i DP da sistemare. Le
+    conferme finiscono nel file per Neta ed <strong>entrano subito nei volumi</strong>, anche nel passato.</p>
   <ul>
-    <li><strong>Controlli sempre incrociati, con la fonte.</strong> Per il distretto di una presa ci sono fino a quattro
+    <li><strong>Controlli sempre incrociati, con la fonte.</strong> Per il distretto di un punto di erogazione ci sono fino a quattro
       fonti indipendenti, in ordine di affidabilità:
       <ol>
         <li><strong>civico ANNCSU</strong>: il distretto in cui cade il civico vero;</li>
@@ -274,25 +276,25 @@
       CC-BY 4.0, aggiornato ogni mese) dà la posizione vera dei civici. A settembre 2026 i civici sono posizionati in 12
       comuni su 22 (Mortara solo il 3%). Negli altri comuni ANNCSU dice solo se l'indirizzo esiste.</li>
     <li><strong>Stradario via → distretto</strong> (sotto-tab Stradario): ricavato una tantum per comune, dai civici
-      ANNCSU dove sono posizionati, altrimenti dalle prese (la fonte è nella colonna Note).
-      Conta un voto per civico, non per presa, così un condominio non pesa più di una casa. Le vie divise tra due distretti
-      hanno un tratto per distretto (per civico, a volte pari e dispari separati). Un palazzo con più prese in un altro
+      ANNCSU dove sono posizionati, altrimenti dai punti di erogazione (la fonte è nella colonna Note).
+      Conta un voto per civico, non per DP, così un condominio non pesa più di una casa. Le vie divise tra due distretti
+      hanno un tratto per distretto (per civico, a volte pari e dispari separati). Un palazzo con più DP in un altro
       distretto diventa un'eccezione da verificare. Le vie senza un taglio netto restano "a cavallo" e non si controllano.
-      Non votano le prese a meno di 30 m dal confine né quelle con la coordinata sbagliata (vedi sotto). Il file
+      Non votano i DP a meno di 30 m dal confine né quelle con la coordinata sbagliata (vedi sotto). Il file
       <code>project_docs/stradario_distretti.csv</code> è correggibile a mano; rigenerarlo cancella le correzioni.</li>
     <li><strong>OpenStreetMap</strong>: il tracciato vero delle vie, indipendente da Neta. I nomi sono abbinati anche se
       scritti in modo diverso (VIA F.LLI CAIROLI = Via Fratelli Cairoli, VIA XX SETTEMBRE = Via Venti Settembre). Serve a
-      dire se una presa sta davvero sulla sua via (entro 150 m) e, nello stradario, quali distretti la via attraversa: in
+      dire se un DP sta davvero sulla sua via (entro 150 m) e, nello stradario, quali distretti la via attraversa: in
       rosso se non c'è il distretto dello stradario.</li>
     <li><strong>Motivi</strong>: NO DISTRETTO; <code>*</code> (non indicato); distretto di un altro comune; distretto
       soppresso; via di altro distretto (Neta dice un distretto, lo stradario un altro); diverso dalla posizione (solo
-      per le vie senza distretto: la presa cade dentro un altro distretto, oltre 30 m dal confine del suo).</li>
+      per le vie senza distretto: il DP cade dentro un altro distretto, oltre 30 m dal confine del suo).</li>
     <li><strong>Proposta</strong>: "via e posizione d'accordo" (la più sicura), "dalla via" oppure "dalla posizione".
       Il pulsante di conferma in blocco prende solo le proposte su cui almeno due fonti sono disponibili e concordano
       tutte.</li>
-    <li><strong>Mantieni attuale</strong>: se la segnalazione è un falso allarme confermi il distretto che la presa ha
-      già (anche NO DISTRETTO). La presa è <em>validata</em>: non conta più tra quelle da sistemare e non va nel file per
-      Neta. Se un giorno Neta le cambiasse distretto, ricomparirebbe come conferma da recepire.</li>
+    <li><strong>Mantieni attuale</strong>: se la segnalazione è un falso allarme confermi il distretto che il DP ha
+      già (anche NO DISTRETTO). Il DP è <em>validato</em>: non conta più tra quelli da sistemare e non va nel file per
+      Neta. Se un giorno Neta gli cambiasse distretto, ricomparirebbe come conferma da recepire.</li>
     <li><strong>Confini dei comuni</strong>: in tutte le mappe si possono mostrare i confini ISTAT dei comuni dal menu dei
       livelli in alto a destra ("Confini comuni (ISTAT)").</li>
   </ul>
@@ -301,13 +303,13 @@
 <div class="panel">
   <h2>Coordinate da verificare e invii a Neta</h2>
   <p>Un file a parte per Neta, <strong>ricalcolato a ogni estrazione</strong> indipendentemente dalle conferme del
-    distretto: una presa ci resta finché Neta non corregge la coordinata. I problemi segnalati sono:</p>
+    distretto: un DP ci resta finché Neta non corregge la coordinata. I problemi segnalati sono:</p>
   <ul>
     <li><strong>mancanti</strong>, a 0,0, fuori provincia, <strong>virgola mancante</strong> (8742620 invece di 8,742620)
       o <strong>latitudine e longitudine invertite</strong>; negli ultimi due casi c'è anche la coordinata corretta;</li>
     <li><strong>fuori dal comune</strong>, dai confini ufficiali ISTAT (per esempio "cade in Noviglio (MI)"), con 100 m
       di tolleranza;</li>
-    <li><strong>coordinata segnaposto</strong>: lo stesso punto usato per prese di 3 o più vie diverse;</li>
+    <li><strong>coordinata segnaposto</strong>: lo stesso punto usato per DP di 3 o più vie diverse;</li>
     <li><strong>lontana dal suo civico</strong>: oltre 150 m dal civico ANNCSU. Se il civico non è posizionato si
       guarda il tracciato OpenStreetMap della via (oltre 150 m), altrimenti il confronto con i civici vicini;</li>
     <li><strong>civico non presente in ANNCSU</strong>: la via c'è ma il civico no (civico sbagliato in Neta, o non ancora
@@ -327,9 +329,9 @@
   <p>Poi ci sono i controlli incrociati: comune giusto (ISTAT), entro 60 m dalla via OSM, distretto uguale a quello
     dello stradario o della via OSM. Ogni controllo non superato abbassa di un livello. Con affidabilità bassa non si
     propone niente: "da rilevare sul posto".</p>
-  <p><strong>Registra invio</strong> scarica il file con le sole prese ancora aperte e lo segna nel registro: data, chi,
-    quali prese. Il registro dice quante prese Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
-    dice quante volte una presa era già stata mandata. Gli Excel "solo per guardare" non registrano niente.</p>
+  <p><strong>Registra invio</strong> scarica il file con i soli punti di erogazione ancora aperti e lo segna nel registro: data, chi,
+    quali DP. Il registro dice quanti DP Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
+    dice quante volte un DP era già stato mandato. Gli Excel "solo per guardare" non registrano niente.</p>
 </div>
 
 <div class="panel">

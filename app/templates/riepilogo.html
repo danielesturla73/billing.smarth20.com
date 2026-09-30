@@ -37,9 +37,9 @@
 
   {% if riassegnati %}
   <details class="avvisi-collassabili">
-    <summary>Volumi spostati dalle conferme del tab Prese ({{ riassegnati|length }}
+    <summary>Volumi spostati dalle conferme del tab Punti di erogazione ({{ riassegnati|length }}
       {{ "spostamento" if riassegnati|length == 1 else "spostamenti" }})</summary>
-    <p class="nota-metodologica">Le prese confermate nel <a href="/pagine/prese?comune={{ comune | urlencode }}">tab Prese</a>
+    <p class="nota-metodologica">I punti di erogazione confermati nel <a href="/pagine/prese?comune={{ comune | urlencode }}">tab Punti di erogazione</a>
       portano il loro volume nel distretto confermato, per tutta la loro storia. "Da" è il distretto scritto da Neta
       (NO DISTRETTO, * o un codice di altro comune non erano in nessun distretto: quel volume si recupera).
       {% if anni_consolidati %}I mesi degli anni consolidati ({{ anni_consolidati | map(attribute='anno') | join(', ') }})

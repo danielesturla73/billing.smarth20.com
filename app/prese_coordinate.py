@@ -406,7 +406,7 @@ def _coordinate_da_verificare(comune: str) -> pd.DataFrame:
         if problema.iloc[i]:
             continue
         if chiave in condivise:
-            problema.iloc[i] = f"Coordinata segnaposto: stesso punto per prese di {condivise[chiave]} vie diverse"
+            problema.iloc[i] = f"Coordinata segnaposto: stesso punto per DP di {condivise[chiave]} vie diverse"
         elif chiave in fuori:
             motivo, d, la, lo, fonte = fuori[chiave]
             problema.iloc[i] = motivo
@@ -508,7 +508,7 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
     """File per Neta con le prese da ricontrollare sul posto / in mappa."""
     parti = [c.assign(COMUNE=comune) for comune in comuni if not (c := coordinate_da_verificare(comune)).empty]
     colonne = {
-        "COMUNE": "Comune", "DP": "Presa (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
+        "COMUNE": "Comune", "DP": "Punto di erogazione (DP)", "INDIRIZZO": "Indirizzo", "CAP": "CAP",
         "SERVIZI": "Codici servizio", "N_SERVIZI": "N. servizi", "DISTRETTO": "Distretto attuale",
         "PROBLEMA": "Problema", "DISTANZA_M": "Distanza (m)", "LAT": "Latitudine", "LON": "Longitudine",
         "LAT_CORRETTA": "Latitudine corretta (proposta)", "LON_CORRETTA": "Longitudine corretta (proposta)",
@@ -516,17 +516,17 @@ def esporta_coordinate_excel(comuni: list[str]) -> bytes:
     }
     if parti:
         df = pd.concat(parti, ignore_index=True)
-        df["DP"] = np.where(df["DP"] == "", "(servizio senza presa)", df["DP"])
+        df["DP"] = np.where(df["DP"] == "", "(servizio senza DP)", df["DP"])
         df = df[list(colonne)].rename(columns=colonne)
     else:
         df = pd.DataFrame(columns=list(colonne.values()))
     return _excel(df, "Coordinate", LEGENDA_COORDINATE)
 
 LEGENDA_COORDINATE = [
-    ("Cosa contiene", "Prese con la coordinata da verificare. Una riga per presa, i codici servizio nella stessa cella. "
-                      "Ricalcolato a ogni estrazione: una presa resta finche' la coordinata non viene corretta."),
+    ("Cosa contiene", "Punti di erogazione (DP) con la coordinata da verificare. Una riga per DP, i codici servizio nella stessa cella. "
+                      "Ricalcolato a ogni estrazione: un DP resta finche' la coordinata non viene corretta."),
     ("Problema", "Coordinate mancanti, a 0,0 o fuori provincia; virgola mancante o latitudine/longitudine invertite; "
-                 "fuori dal comune (confini ISTAT); coordinata segnaposto (stesso punto per prese di 3 o piu' vie); "
+                 "fuori dal comune (confini ISTAT); coordinata segnaposto (stesso punto per DP di 3 o piu' vie); "
                  "lontana dal suo civico ANNCSU (oltre 150 m); lontana dalla sua via in OpenStreetMap (oltre 150 m) "
                  "o dal resto della via; in un altro distretto rispetto all'indirizzo; civico non presente in ANNCSU."),
     ("Distanza (m)", "Quanto la coordinata attuale dista dal riferimento del problema (civico, via, confine del comune)."),

@@ -698,7 +698,7 @@ def genera_stradario(comune: str) -> pd.DataFrame:
     nella colonna note."""
     p = prese_comune(comune)
     if p.empty:
-        raise ValueError(f"Nessuna presa per il comune '{comune}'.")
+        raise ValueError(f"Nessun punto di erogazione per il comune '{comune}'.")
     # Votano solo le prese chiaramente dentro un distretto: a meno di
     # TOLLERANZA_BORDO_M dal confine la posizione non e' una prova (a
     # Belgioioso palazzi sul confine diventavano eccezioni della via).
@@ -734,7 +734,7 @@ def genera_stradario(comune: str) -> pd.DataFrame:
             pos[[i for i, v in enumerate(vie_prese) if v in da_anncsu]] = ""
     tutte = pd.concat([p[["INDIRIZZO"]], righe_civici], ignore_index=True)
     nuovo = stradario.genera_stradario(tutte, list(pos) + pos_civici, comune)
-    fonte = ["civici ANNCSU" if v in da_anncsu else "prese Neta" for v in nuovo["via"]]
+    fonte = ["civici ANNCSU" if v in da_anncsu else "punti di erogazione Neta" for v in nuovo["via"]]
     nuovo["note"] = [f"{n}; da {f}" if n else f"da {f}" for n, f in zip(nuovo["note"], fonte)]
     stradario.salva(comune, nuovo)
     return nuovo
@@ -776,7 +776,7 @@ def conferme_comune(comune: str) -> dict[str, dict]:
             for r in a.to_dict("records")}
 
 
-ORIGINI = {"proposta": "proposta dell'app", "manuale": "spostata a mano", "zona": "spostata con una zona",
+ORIGINI = {"proposta": "proposta dell'app", "manuale": "spostato a mano", "zona": "spostato con una zona",
            "mantieni": "mantieni attuale", "": ""}
 
 

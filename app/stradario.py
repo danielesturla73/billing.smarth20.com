@@ -156,7 +156,7 @@ def genera_stradario(prese_comune: pd.DataFrame, distretti_da_posizione: list[st
             n_fuori = sum(v[2] for v in residui if v in nel)
             righe.append((via, civ, da, a, d, sum(v[2] for v in nel), n_fuori, "via divisa tra distretti" if divisa else ""))
         for civico, d, n, _ in eccezioni:
-            righe.append((via, "tutti", civico, civico, d, n, 0, f"eccezione: {n} prese al civico {civico}, da verificare"))
+            righe.append((via, "tutti", civico, civico, d, n, 0, f"eccezione: {n} punti di erogazione al civico {civico}, da verificare"))
 
     df = pd.DataFrame(righe, columns=COLONNE[1:])
     df.insert(0, "comune", comune.strip().upper())

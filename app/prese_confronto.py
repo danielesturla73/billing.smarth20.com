@@ -5,6 +5,11 @@ file, il distretto scritto da Neta confrontato con quello che abbiamo noi
 nell'estrazione precedente). E' ridondante con il tab Prese, ma e' un
 controllo: a tendere va a zero, a parte le prese nuove.
 
+Nota (Daniele, 29/09/2026): quello che qui e nel resto dell'app si chiamava
+"presa" e' il DP di Neta, il punto di erogazione (delivery point, un
+contatore), non la presa vera; nei testi visibili si chiama "punto di
+erogazione (DP)". I nomi nel codice sono rimasti.
+
 Il confronto si fa PRIMA di aggiornare anagrafica_servizi con il file (dopo,
 il "prima" sarebbe gia' sovrascritto). Ogni controllo resta nella tabella
 controlli_prese, per scaricare l'elenco e vedere l'andamento nel tempo.
@@ -24,11 +29,11 @@ from app.prese_coordinate import _excel
 # Stati di una presa nel controllo. I primi quattro sono differenze da
 # guardare; RECEPITA e' la buona notizia (Neta ha corretto il CRM).
 STATI = {
-    "NON_RECEPITA": "Confermata da noi, Neta ha ancora un altro distretto",
+    "NON_RECEPITA": "Confermato da noi, Neta ha ancora un altro distretto",
     "MANTIENI_CAMBIATA": "\"Mantieni attuale\", ma Neta ha cambiato distretto",
-    "CAMBIATA": "Non confermata, Neta ha cambiato distretto rispetto all'estrazione precedente",
-    "NUOVA": "Presa nuova, mai vista nelle estrazioni precedenti",
-    "RECEPITA": "Neta ha messo il distretto confermato da noi (recepita con questa estrazione)",
+    "CAMBIATA": "Non confermato, Neta ha cambiato distretto rispetto all'estrazione precedente",
+    "NUOVA": "Punto di erogazione nuovo, mai visto nelle estrazioni precedenti",
+    "RECEPITA": "Neta ha messo il distretto confermato da noi (recepito con questa estrazione)",
 }
 DIFFERENZE = ["NON_RECEPITA", "MANTIENI_CAMBIATA", "CAMBIATA", "NUOVA"]
 
@@ -203,13 +208,13 @@ def esporta_excel(id_controllo: int) -> tuple[str, bytes]:
         righe = pd.read_sql("SELECT * FROM controlli_prese_righe WHERE ID_CONTROLLO = ?", conn, params=(id_controllo,))
     ordine = {s: i for i, s in enumerate(STATI)}
     righe = righe.sort_values(["STATO", "CHIAVE"], key=lambda c: c.map(ordine) if c.name == "STATO" else c)
-    righe["DP"] = np.where(righe["CHIAVE"].str.startswith("S"), "(servizio senza presa)", righe["CHIAVE"])
+    righe["DP"] = np.where(righe["CHIAVE"].str.startswith("S"), "(servizio senza DP)", righe["CHIAVE"])
     righe["STATO"] = righe["STATO"].map(STATI)
     colonne = {
-        "STATO": "Esito", "DP": "Presa (DP)", "DISTRETTO_NETA": "Distretto in Neta (questa estrazione)",
+        "STATO": "Esito", "DP": "Punto di erogazione (DP)", "DISTRETTO_NETA": "Distretto in Neta (questa estrazione)",
         "DISTRETTO_PRIMA": "Distretto in Neta (estrazione precedente)", "DISTRETTO_NOSTRO": "Distretto usato nel calcolo",
         "INDIRIZZO": "Indirizzo", "SERVIZI": "Codici servizio",
     }
-    contenuto = _excel(righe[list(colonne)].rename(columns=colonne), "Controllo prese")
-    nome = f"controllo_prese_{testa[0].replace(' ', '_')}_{testa[1][:10]}.xlsx"
+    contenuto = _excel(righe[list(colonne)].rename(columns=colonne), "Controllo punti erogazione")
+    nome = f"controllo_punti_erogazione_{testa[0].replace(' ', '_')}_{testa[1][:10]}.xlsx"
     return nome, contenuto
