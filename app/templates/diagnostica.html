@@ -4,15 +4,16 @@
 {% if comune %}
   <h1>Diagnostica — {{ comune }}</h1>
   <p class="nota-metodologica">
-    Anomalie da verificare a mano: distretti anomali/mancanti, letture escluse dal Metodo B (sentinella,
+    Anomalie da verificare a mano: letture escluse dal Metodo B (sentinella,
     reset di contatore non marcati, ritmo di consumo assurdo), utenze scomparse senza un contratto
-    chiuso che lo spieghi, e utenze cessate la cui ultima lettura non è reale.
+    chiuso che lo spieghi, e utenze cessate la cui ultima lettura non è reale. I distretti anomali o mancanti
+    non sono più qui: si sistemano nella pagina <a href="/pagine/prese?comune={{ comune | urlencode }}">Punti di erogazione</a>.
   </p>
 
   <div class="kpi-grid">
-    <div class="kpi {% if segnalazioni|length > 0 %}warn{% endif %}">
-      <div class="etichetta">Segnalazioni distretto</div>
-      <div class="valore">{{ segnalazioni|length }}</div>
+    <div class="kpi {% if dp_da_confermare %}warn{% endif %}">
+      <div class="etichetta">DP da confermare (distretto) — <a href="/pagine/prese?comune={{ comune | urlencode }}">vai</a></div>
+      <div class="valore">{{ dp_da_confermare if dp_da_confermare is not none else '—' }}</div>
     </div>
     <div class="kpi {% if anomalie_metodo_b|length > 0 %}warn{% endif %}">
       <div class="etichetta">Anomalie Metodo B</div>
@@ -71,26 +72,6 @@
             <td>{{ r["Ultimo Stato Servizio"] }}</td>
             <td>{{ r["Ultima Data Lettura"] }}</td>
             <td>{{ r["Ultimo File in cui Compare"] }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </details>
-
-  <details class="panel">
-    <summary>Segnalazioni — distretto anomalo o mancante ({{ segnalazioni|length }})</summary>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Codice Servizio</th><th>Indirizzo</th><th>Distretto Riportato</th><th>Motivo</th><th>Stato Servizio</th></tr></thead>
-        <tbody>
-          {% for r in segnalazioni %}
-          <tr>
-            <td class="num"><a href="/pagine/utenza?comune={{ comune }}&codice_servizio={{ r['Codice Servizio'] }}">{{ r["Codice Servizio"] }}</a></td>
-            <td>{{ r["Indirizzo"] }}</td>
-            <td>{{ r["Distretto Riportato"] }}</td>
-            <td>{{ r["Motivo"] }}</td>
-            <td>{{ r["Stato Servizio"] }}</td>
           </tr>
           {% endfor %}
         </tbody>

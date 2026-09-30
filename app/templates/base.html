@@ -44,28 +44,22 @@
     {# Gruppo "per comune": si portano dietro il comune scelto nel filtro #}
     {% set q = '?comune=' + (comune_selezionato | urlencode) if comune_selezionato else '' %}
     <span class="sep" aria-hidden="true"></span>
-    <a href="/pagine/riepilogo{{ q }}"
-       class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Volumi</a>
-    <a href="/pagine/diagnostica{{ q }}"
-       class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica</a>
+    <a href="/pagine/riepilogo{{ q }}" title="Volumi per distretto e mese; nella stessa sezione la Diagnostica dei dati"
+       class="{% if pagina_attiva in ('riepilogo', 'diagnostica') %}attivo{% endif %}">Volumi</a>
     <a href="/pagine/prese{{ q }}"
        class="{% if pagina_attiva == 'prese' %}attivo{% endif %}">Punti di erogazione (DP)</a>
     <span class="sep" aria-hidden="true"></span>
+    <a href="/pagine/invio-wms" title="Invio a WMS SmartH2O; nella stessa sezione il Consolidamento annuale"
+       class="{% if pagina_attiva in ('invio_wms', 'consolidamento') %}attivo{% endif %}">Invio WMS</a>
     <a href="/pagine/distretti{{ q }}"
        class="{% if pagina_attiva == 'distretti' %}attivo{% endif %}">Distretti</a>
-    <a href="/pagine/consolidamento"
-       class="{% if pagina_attiva == 'consolidamento' %}attivo{% endif %}">Consolidamento</a>
-    <a href="/pagine/invio-wms"
-       class="{% if pagina_attiva == 'invio_wms' %}attivo{% endif %}">Invio WMS</a>
     {% if request.state.utente.ruolo != 'viewer' %}
     <a href="/pagine/carica"
        class="{% if pagina_attiva == 'carica' %}attivo{% endif %}">Carica</a>
     {% endif %}
     <span class="sep" aria-hidden="true"></span>
-    <a href="/pagine/info"
-       class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Come funziona</a>
-    <a href="/pagine/storia"
-       class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Novità</a>
+    <a href="/pagine/info" title="Come funziona e Novità"
+       class="{% if pagina_attiva in ('info', 'storia') %}attivo{% endif %}">Guida</a>
     {% if request.state.utente.ruolo == 'admin' %}
     <span class="sep" aria-hidden="true"></span>
     <a href="/admin/utenti"
@@ -74,6 +68,19 @@
   </nav>
   {% endif %}
   <main>
+    {# Sotto-tab (Daniele, 30/09/2026): i tab in alto sono ridotti a 8; Diagnostica sta con Volumi, Consolidamento con Invio WMS,
+       Come funziona e Novita' nella Guida. Gli indirizzi delle pagine non cambiano. #}
+    {% set q2 = '?comune=' + (comune_selezionato | urlencode) if comune_selezionato else '' %}
+    {% if pagina_attiva in ('riepilogo', 'diagnostica') %}
+    <div class="sotto-tab"><a href="/pagine/riepilogo{{ q2 }}" class="{% if pagina_attiva == 'riepilogo' %}attivo{% endif %}">Volumi</a>
+      <a href="/pagine/diagnostica{{ q2 }}" class="{% if pagina_attiva == 'diagnostica' %}attivo{% endif %}">Diagnostica dei dati</a></div>
+    {% elif pagina_attiva in ('invio_wms', 'consolidamento') %}
+    <div class="sotto-tab"><a href="/pagine/invio-wms" class="{% if pagina_attiva == 'invio_wms' %}attivo{% endif %}">Invio a WMS</a>
+      <a href="/pagine/consolidamento" class="{% if pagina_attiva == 'consolidamento' %}attivo{% endif %}">Consolidamento annuale</a></div>
+    {% elif pagina_attiva in ('info', 'storia') %}
+    <div class="sotto-tab"><a href="/pagine/info" class="{% if pagina_attiva == 'info' %}attivo{% endif %}">Come funziona</a>
+      <a href="/pagine/storia" class="{% if pagina_attiva == 'storia' %}attivo{% endif %}">Novità</a></div>
+    {% endif %}
     {% block contenuto %}{% endblock %}
   </main>
   <footer>Analisi Consumi da Fatturazione — Metodo B (differenza fisica tra letture reali consecutive)</footer>

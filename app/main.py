@@ -947,13 +947,19 @@ def pagina_diagnostica(request: Request, comune: str | None = None):
         r for r in utenze_scomparse_json if r["Da Verificare"] == "Sì (era ancora attiva)"
     ]
 
+    # I distretti anomali o mancanti stanno in Punti di erogazione (Daniele, 30/09/2026): qui solo il numero e il link.
+    try:
+        dp_da_confermare = prese.riepilogo_comuni([comune_trovato])[0]["aperti"]
+    except Exception:
+        dp_da_confermare = None
+
     return templates.TemplateResponse(request, "diagnostica.html", {
         "request": request,
         "pagina_attiva": "diagnostica",
         "comuni_disponibili": comuni_disponibili,
         "comune_selezionato": comune_trovato,
         "comune": comune_trovato,
-        "segnalazioni": _tabella_json(risultato.segnalazioni),
+        "dp_da_confermare": dp_da_confermare,
         "anomalie_metodo_b": _tabella_json(risultato.anomalie_metodo_b),
         "utenze_scomparse_da_verificare": utenze_scomparse_da_verificare,
         "cessate_con_stima_finale": _tabella_json(risultato.cessate_con_stima_finale),
