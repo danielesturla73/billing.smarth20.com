@@ -1,0 +1,6 @@
+# Corrispondenze manuali tra il nome di una via in Neta e il nome che ha in OpenStreetMap o in ANNCSU (Daniele, 30/09/2026).
+# Servono solo dove nessuna regola di abbinamento puo' riconoscere che e' la stessa via (nome di battesimo sbagliato,
+# nome diverso). via_neta = l'indirizzo di Neta senza il civico, in maiuscolo; nome_riferimento = il nome esatto in OSM
+# o in ANNCSU. Vale solo nei comuni in cui quel nome esiste; comune e' solo per chi legge il file.
+comune,via_neta,nome_riferimento
+CAVA MANARA,VIA ALESSANDRO LAMARMORA,Via Alberto Lamarmora

@@ -14,6 +14,7 @@ contributors, ODbL.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
@@ -237,9 +238,38 @@ def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]]) -> tuple[str, l
     return "ok", [candidati[0][4]]
 
 
-def cerca_via(via: str, nomi: list[str]) -> tuple[str, list[str]]:
-    """Come _cerca, con il nome grezzo e con il tentativo senza la localita' dopo " - "."""
-    osm = [(n, *parole(n)) for n in nomi]
+PERCORSO_ALIAS = Path("project_docs/vie_alias.csv")
+_CACHE_ALIAS: dict = {"versione": None, "alias": {}}
+
+
+def alias_vie() -> dict[str, list[str]]:
+    """{via Neta (maiuscolo): [nomi di riferimento]} da project_docs/vie_alias.csv, un file mantenuto a mano
+    (righe che iniziano con # ignorate). Se il file non c'e', {}."""
+    if not PERCORSO_ALIAS.exists():
+        return {}
+    st = PERCORSO_ALIAS.stat()
+    versione = (st.st_mtime_ns, st.st_size)
+    if _CACHE_ALIAS["versione"] != versione:
+        alias: dict[str, list[str]] = {}
+        righe = [r for r in PERCORSO_ALIAS.read_text(encoding="utf-8").splitlines() if r.strip() and not r.lstrip().startswith("#")]
+        for r in csv.DictReader(righe):
+            via, nome = (r.get("via_neta") or "").strip().upper(), (r.get("nome_riferimento") or "").strip()
+            if via and nome:
+                alias.setdefault(via, []).append(nome)
+        _CACHE_ALIAS.update(versione=versione, alias=alias)
+    return _CACHE_ALIAS["alias"]
+
+
+def cerca_via(via: str, nomi: list[str], _osm: list | None = None) -> tuple[str, list[str]]:
+    """Come _cerca, con il nome grezzo e con il tentativo senza la localita' dopo " - ". Prima le
+    corrispondenze manuali di vie_alias.csv, se il nome di riferimento e' tra quelli del comune."""
+    alias = alias_vie().get(via.strip().upper(), [])
+    if alias:
+        presenti = {n.upper().strip(): n for n in nomi}
+        trovati = [presenti[a.upper().strip()] for a in alias if a.upper().strip() in presenti]
+        if trovati:
+            return "ok", trovati[:1]
+    osm = _osm if _osm is not None else [(n, *parole(n)) for n in nomi]
     stato, trovati = _cerca(via, osm)
     if stato == "nessuna" and " - " in via:
         stato, trovati = _cerca(via.split(" - ")[0], osm)
@@ -254,12 +284,10 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     via non si abbina. Se non si trova niente e il nome Neta ha una localita'
     dopo " - " ("VIA F. TURATI - TRE RE", "VIA E.FERMI - MEZZANA CORTI") si
     riprova senza (Daniele, 30/09/2026, Cava Manara)."""
-    osm = [(n, *parole(n)) for n in nomi_osm]
     esito = {}
+    osm = [(n, *parole(n)) for n in nomi_osm]
     for via in vie_neta:
-        stato, trovati = _cerca(via, osm)
-        if stato == "nessuna" and " - " in via:
-            stato, trovati = _cerca(via.split(" - ")[0], osm)
+        stato, trovati = cerca_via(via, nomi_osm, osm)
         if stato == "ok":
             esito[via] = trovati[0]
     return esito

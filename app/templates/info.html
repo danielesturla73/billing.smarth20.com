@@ -398,6 +398,9 @@
   <p>Poi ci sono i controlli incrociati: comune giusto (ISTAT), entro 60 m dalla via OSM, distretto uguale a quello
     dello stradario o della via OSM. Ogni controllo non superato abbassa di un livello. Con affidabilità bassa non si
     propone niente: "da rilevare sul posto".</p>
+  <p><strong>Corrispondenze manuali delle vie.</strong> Dove il nome di una via di Neta non si può abbinare in nessun modo a OpenStreetMap o ad ANNCSU (nome di battesimo sbagliato, nome
+    diverso) si aggiunge una riga a <code>project_docs/vie_alias.csv</code>: comune, via di Neta (senza civico, in maiuscolo) e nome di riferimento (esatto, come in OSM o ANNCSU). Le righe
+    che iniziano con # sono commenti. Oggi c'è una riga, per Via Alessandro Lamarmora a Cava Manara (in OSM "Via Alberto Lamarmora").</p>
   <p><strong>Google Maps.</strong> In ogni riga dell'elenco il link <em>Google Maps</em> apre Google Maps sull'indirizzo del DP, in un'altra scheda: serve a
     controllare a mano dove sta il civico dove ANNCSU non ha la posizione. Se <em>📍 mostra la via</em> non trova la via, sotto l'indirizzo compare un messaggio con lo stesso link. È solo un collegamento: l'app non chiede né salva niente a Google.</p>
   <p><strong>Vie da verificare.</strong> Un file di controllo dei nomi (link "Vie da verificare", Excel): le vie e le frazioni di Neta che non si abbinano a
