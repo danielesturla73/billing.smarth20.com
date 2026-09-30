@@ -422,6 +422,19 @@ def _prese_comune(comune: str) -> pd.DataFrame:
             if principale.index[0] != riga.distretto and principale.iloc[0] >= 0.8 * len(gruppo):
                 p.loc[gruppo.index[gruppo["D_STRADARIO"] == riga.distretto], "D_STRADARIO"] = ""
     civ = anncsu.civici_per_indirizzo(comune, p["INDIRIZZO"])
+    # Civico ANNCSU posizionato FUORI dal comune dell'indirizzo (oltre TOLLERANZA_CONFINE_COMUNE_M dal suo confine): e' un
+    # errore di posizionamento e non si usa (Daniele, 30/09/2026, Giussago Via Aldo Moro 3: a 3,5 km, nel territorio di
+    # Certosa di Pavia, mentre i civici 1, 2, 4 e 5 stanno dove sono i DP; prevaleva su quattro fonti concordi). 35 DP in tutto.
+    lat_c = civ["CIV_LAT"].to_numpy(dtype=float)
+    lon_c = civ["CIV_LON"].to_numpy(dtype=float)
+    con_pos = ~np.isnan(lat_c)
+    if con_pos.any():
+        dist_c = _distanza_dal_comune_m(lat_c[con_pos], lon_c[con_pos], comune)
+        if dist_c is not None:
+            dove_c = _comune_della_posizione(lat_c[con_pos], lon_c[con_pos])
+            fuori_c = np.array([_nome_comune(d.split(" (")[0]) != _nome_comune(comune) for d in dove_c]) & (dist_c > TOLLERANZA_CONFINE_COMUNE_M)
+            if fuori_c.any():
+                civ.loc[np.nonzero(con_pos)[0][fuori_c], ["CIV_LAT", "CIV_LON"]] = np.nan
     p["CIV_LAT"] = civ["CIV_LAT"].to_numpy()
     p["CIV_LON"] = civ["CIV_LON"].to_numpy()
     p["CIVICO_ESISTE"] = civ["CIVICO_ESISTE"].to_numpy()
