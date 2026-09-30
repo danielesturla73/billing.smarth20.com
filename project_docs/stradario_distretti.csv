@@ -201,116 +201,115 @@ BRONI,VIA VALLESCUROPASSO,tutti,,,DBRN02,81,0,da civici ANNCSU
 BRONI,VIA VERDI,tutti,,,DBRN02,36,0,da civici ANNCSU
 BRONI,VIA VIORATE,tutti,,,DBRN02,4,0,da civici ANNCSU
 BRONI,VIALE GRAMSCI,tutti,,,DBRN02,66,0,da civici ANNCSU
-CASORATE PRIMO,CASCINA DORIA,tutti,,,DCSP03,6,0,da prese Neta
-CASORATE PRIMO,CORSO EUROPA UNITA,tutti,,,DCSP03,11,0,da prese Neta
-CASORATE PRIMO,LOCALITA FORNACE,tutti,,,DCSP02,1,0,da prese Neta
-CASORATE PRIMO,LOCALITA' PONTE,tutti,,,DCSP01,1,0,da prese Neta
-CASORATE PRIMO,PIAZZA CONTARDI,tutti,,,,35,0,"a cavallo, non controllata (DCSP03 33, DCSP01 2); da prese Neta"
-CASORATE PRIMO,PIAZZA FRACCARO,tutti,,,DCSP02,1,0,da prese Neta
-CASORATE PRIMO,PIAZZA MIRA,tutti,,,DCSP01,14,0,da prese Neta
-CASORATE PRIMO,STRADA PROVINCIALE 11,tutti,,,DCSP03,1,0,da prese Neta
-CASORATE PRIMO,STRADA PROVINCIALE 190,tutti,,,DCSP02,2,0,da prese Neta
-CASORATE PRIMO,VIA A. NEGRI,tutti,,,DCSP01,22,0,da prese Neta
-CASORATE PRIMO,VIA ACHILLE GRANDI,tutti,,,DCSP02,28,0,da prese Neta
-CASORATE PRIMO,VIA ALCIDE DE GASPERI,tutti,,,DCSP02,16,0,da prese Neta
-CASORATE PRIMO,VIA ALDO MORO,tutti,,,DCSP01,13,0,da prese Neta
-CASORATE PRIMO,VIA ALESSANDRO VOLTA,tutti,,,DCSP01,3,0,da prese Neta
-CASORATE PRIMO,VIA ANGELO VAI,tutti,,,DCSP01,30,0,da prese Neta
-CASORATE PRIMO,VIA ANSELMO DALL'ORTO,tutti,,,DCSP03,98,0,da prese Neta
-CASORATE PRIMO,VIA ANTONIO GRAMSCI,tutti,,,DCSP01,33,0,da prese Neta
-CASORATE PRIMO,VIA ANTONIO MEUCCI,tutti,,,DCSP01,9,0,da prese Neta
-CASORATE PRIMO,VIA BASSO,tutti,,,DCSP03,6,1,da prese Neta
-CASORATE PRIMO,VIA BESATE,tutti,,,DCSP01,64,0,da prese Neta
-CASORATE PRIMO,VIA BESATE,tutti,7,7,DCSP02,5,0,"eccezione: 5 prese al civico 7, da verificare; da prese Neta"
-CASORATE PRIMO,VIA BIANCHI VIRGINIO,tutti,,,DCSP03,16,0,da prese Neta
-CASORATE PRIMO,VIA BONIZZONI,tutti,,,DCSP03,34,0,da prese Neta
-CASORATE PRIMO,VIA BORSELLINO,tutti,,,DCSP03,21,0,da prese Neta
-CASORATE PRIMO,VIA BREMI G.,tutti,,,DCSP01,9,0,da prese Neta
-CASORATE PRIMO,VIA C.VITTORIO VENETO,tutti,,,DCSP03,15,0,da prese Neta
-CASORATE PRIMO,VIA CAPO DI VICO,tutti,,,DCSP02,33,0,da prese Neta
-CASORATE PRIMO,VIA CESARE BATTISTI,tutti,,,DCSP02,65,0,da prese Neta
-CASORATE PRIMO,VIA CHINAGLIA,tutti,,,DCSP02,7,0,da prese Neta
-CASORATE PRIMO,VIA CIRCONVALLAZIONE,tutti,,,DCSP02,12,0,da prese Neta
-CASORATE PRIMO,VIA DE AMICI,tutti,,,DCSP01,26,0,da prese Neta
-CASORATE PRIMO,VIA DEGLI OLMI,tutti,,,DCSP03,3,0,da prese Neta
-CASORATE PRIMO,VIA DEI CEDRI,tutti,,,DCSP03,16,0,da prese Neta
-CASORATE PRIMO,VIA DEI GELSI,tutti,,,DCSP03,11,0,da prese Neta
-CASORATE PRIMO,VIA DEI LARICI,tutti,,,DCSP03,8,0,da prese Neta
-CASORATE PRIMO,VIA DEI PINI,tutti,,,DCSP03,20,0,da prese Neta
-CASORATE PRIMO,VIA DEI SALICI,tutti,,,DCSP03,9,0,da prese Neta
-CASORATE PRIMO,VIA DELFINONI,tutti,,,DCSP01,64,0,da prese Neta
-CASORATE PRIMO,VIA DELL'ARTIGIANATO,tutti,,,DCSP02,1,0,da prese Neta
-CASORATE PRIMO,VIA DELL'INDUSTRIA,tutti,,,DCSP02,17,0,da prese Neta
-CASORATE PRIMO,VIA DELLE BETULLE,tutti,,,DCSP03,21,0,da prese Neta
-CASORATE PRIMO,VIA DELLE QUERCE,tutti,,,DCSP03,27,0,da prese Neta
-CASORATE PRIMO,VIA DI BELLA GIOVANNI,tutti,,,DCSP03,17,0,da prese Neta
-CASORATE PRIMO,VIA DISABELLA,tutti,,,DCSP01,5,0,da prese Neta
-CASORATE PRIMO,VIA DON AMBROGIO COLZANI,tutti,,,DCSP01,21,0,da prese Neta
-CASORATE PRIMO,VIA DON GIOVANNI MINZONI,tutti,,,DCSP02,38,0,da prese Neta
-CASORATE PRIMO,VIA DON LORENZO MILANI,tutti,,,DCSP01,16,0,da prese Neta
-CASORATE PRIMO,VIA DON LUIGI STURZO,tutti,,,DCSP02,9,0,da prese Neta
-CASORATE PRIMO,VIA DON MAESTRI,tutti,,,DCSP01,3,0,da prese Neta
-CASORATE PRIMO,VIA DON POMPEO MAGNONI,tutti,,,DCSP01,16,0,da prese Neta
-CASORATE PRIMO,VIA DUE GIUGNO,tutti,,,DCSP01,66,0,da prese Neta
-CASORATE PRIMO,VIA ENRICO BERLINGUER,tutti,,,DCSP01,22,0,da prese Neta
-CASORATE PRIMO,VIA ENRICO DE NICOLA,tutti,,,DCSP02,3,0,da prese Neta
-CASORATE PRIMO,VIA ENRICO FERMI,tutti,,,DCSP01,2,0,da prese Neta
-CASORATE PRIMO,VIA F.LLI CERVI,tutti,,,DCSP02,24,0,da prese Neta
-CASORATE PRIMO,VIA FILIPPO TURATI,tutti,,,DCSP02,19,0,da prese Neta
-CASORATE PRIMO,VIA FRATELLI DI DIO,tutti,,,DCSP02,13,0,da prese Neta
-CASORATE PRIMO,VIA FRATELLI KENNEDY,tutti,,,DCSP03,23,0,da prese Neta
-CASORATE PRIMO,VIA GALILEO GALILEI,tutti,,,DCSP01,13,0,da prese Neta
-CASORATE PRIMO,VIA GIACOMO MATTEOTTI,tutti,,,DCSP01,4,0,da prese Neta
-CASORATE PRIMO,VIA GIORDANO BRUNO,tutti,,,DCSP03,27,0,da prese Neta
-CASORATE PRIMO,VIA GIOVANNI FALCONE,tutti,,,DCSP03,2,0,da prese Neta
-CASORATE PRIMO,VIA GIUSEPPE DI VITTORIO,tutti,,,DCSP01,34,0,da prese Neta
-CASORATE PRIMO,VIA GIUSEPPE GARIBALDI,tutti,,52,DCSP03,52,0,via divisa tra distretti; da prese Neta
-CASORATE PRIMO,VIA GIUSEPPE GARIBALDI,tutti,53,,DCSP02,21,0,via divisa tra distretti; da prese Neta
-CASORATE PRIMO,VIA GIUSEPPE MAZZINI,tutti,,,DCSP01,4,0,da prese Neta
-CASORATE PRIMO,VIA GIUSEPPE VERDI,tutti,,,DCSP01,16,0,da prese Neta
-CASORATE PRIMO,VIA GRAMEGNA,tutti,,,DCSP01,4,0,da prese Neta
-CASORATE PRIMO,VIA GUGLIELMO MARCONI,tutti,,,,34,0,"a cavallo, non controllata (DCSP03 18, DCSP01 16); da prese Neta"
-CASORATE PRIMO,VIA I MAGGIO,tutti,,,DCSP01,19,0,da prese Neta
-CASORATE PRIMO,VIA LARGO AVIS,tutti,,,DCSP03,1,0,da prese Neta
-CASORATE PRIMO,VIA LEONARDO DA VINCI,tutti,,,DCSP02,18,0,da prese Neta
-CASORATE PRIMO,VIA LUIGI GALVANI,tutti,,,DCSP01,20,0,da prese Neta
-CASORATE PRIMO,VIA LUXEMBURG,tutti,,,DCSP02,20,0,da prese Neta
-CASORATE PRIMO,VIA MAGNAGHI,tutti,,,DCSP01,39,0,da prese Neta
+CASORATE PRIMO,CASCINA DORIA,tutti,,,DCSP03,6,0,da punti di erogazione Neta
+CASORATE PRIMO,CORSO EUROPA UNITA,tutti,,,DCSP03,11,0,da punti di erogazione Neta
+CASORATE PRIMO,LOCALITA FORNACE,tutti,,,DCSP02,1,0,da punti di erogazione Neta
+CASORATE PRIMO,LOCALITA' PONTE,tutti,,,DCSP01,1,0,da punti di erogazione Neta
+CASORATE PRIMO,PIAZZA CONTARDI,tutti,,,,35,0,"a cavallo, non controllata (DCSP03 33, DCSP01 2); da punti di erogazione Neta"
+CASORATE PRIMO,PIAZZA FRACCARO,tutti,,,DCSP02,1,0,da punti di erogazione Neta
+CASORATE PRIMO,PIAZZA MIRA,tutti,,,DCSP01,14,0,da punti di erogazione Neta
+CASORATE PRIMO,STRADA PROVINCIALE 11,tutti,,,DCSP03,1,0,da punti di erogazione Neta
+CASORATE PRIMO,STRADA PROVINCIALE 190,tutti,,,DCSP02,2,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA A. NEGRI,tutti,,,DCSP01,22,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ACHILLE GRANDI,tutti,,,DCSP02,28,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ALCIDE DE GASPERI,tutti,,,DCSP02,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ALDO MORO,tutti,,,DCSP01,13,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ALESSANDRO VOLTA,tutti,,,DCSP01,3,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ANGELO VAI,tutti,,,DCSP01,30,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ANSELMO DALL'ORTO,tutti,,,DCSP03,98,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ANTONIO GRAMSCI,tutti,,,DCSP01,33,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ANTONIO MEUCCI,tutti,,,DCSP01,9,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA BASSO,tutti,,,DCSP03,6,1,da punti di erogazione Neta
+CASORATE PRIMO,VIA BESATE,tutti,,,DCSP01,64,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA BESATE,tutti,7,7,DCSP02,5,0,"eccezione: 5 punti di erogazione al civico 7, da verificare; da punti di erogazione Neta"
+CASORATE PRIMO,VIA BIANCHI VIRGINIO,tutti,,,DCSP03,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA BONIZZONI,tutti,,,DCSP03,34,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA BORSELLINO,tutti,,,DCSP03,21,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA BREMI G.,tutti,,,DCSP01,9,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA C.VITTORIO VENETO,tutti,,,DCSP03,15,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA CAPO DI VICO,tutti,,,DCSP02,33,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA CESARE BATTISTI,tutti,,,DCSP02,65,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA CHINAGLIA,tutti,,,DCSP02,7,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA CIRCONVALLAZIONE,tutti,,,DCSP02,12,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DE AMICI,tutti,,,DCSP01,26,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEGLI OLMI,tutti,,,DCSP03,3,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEI CEDRI,tutti,,,DCSP03,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEI GELSI,tutti,,,DCSP03,11,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEI LARICI,tutti,,,DCSP03,8,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEI PINI,tutti,,,DCSP03,20,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DEI SALICI,tutti,,,DCSP03,9,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DELFINONI,tutti,,,DCSP01,64,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DELL'ARTIGIANATO,tutti,,,DCSP02,1,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DELL'INDUSTRIA,tutti,,,DCSP02,17,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DELLE BETULLE,tutti,,,DCSP03,21,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DELLE QUERCE,tutti,,,DCSP03,27,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DI BELLA GIOVANNI,tutti,,,DCSP03,17,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DISABELLA,tutti,,,DCSP01,5,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON AMBROGIO COLZANI,tutti,,,DCSP01,21,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON GIOVANNI MINZONI,tutti,,,DCSP02,38,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON LORENZO MILANI,tutti,,,DCSP01,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON LUIGI STURZO,tutti,,,DCSP02,9,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON MAESTRI,tutti,,,DCSP01,3,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DON POMPEO MAGNONI,tutti,,,DCSP01,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA DUE GIUGNO,tutti,,,DCSP01,66,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ENRICO BERLINGUER,tutti,,,DCSP01,22,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ENRICO DE NICOLA,tutti,,,DCSP02,3,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA ENRICO FERMI,tutti,,,DCSP01,2,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA F.LLI CERVI,tutti,,,DCSP02,24,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA FILIPPO TURATI,tutti,,,DCSP02,19,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA FRATELLI DI DIO,tutti,,,DCSP02,13,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA FRATELLI KENNEDY,tutti,,,DCSP03,23,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GALILEO GALILEI,tutti,,,DCSP01,13,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIACOMO MATTEOTTI,tutti,,,DCSP01,4,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIORDANO BRUNO,tutti,,,DCSP03,27,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIOVANNI FALCONE,tutti,,,DCSP03,2,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIUSEPPE DI VITTORIO,tutti,,,DCSP01,34,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIUSEPPE GARIBALDI,tutti,,52,DCSP03,52,0,via divisa tra distretti; da punti di erogazione Neta
+CASORATE PRIMO,VIA GIUSEPPE GARIBALDI,tutti,53,,DCSP02,21,0,via divisa tra distretti; da punti di erogazione Neta
+CASORATE PRIMO,VIA GIUSEPPE MAZZINI,tutti,,,DCSP01,4,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GIUSEPPE VERDI,tutti,,,DCSP01,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GRAMEGNA,tutti,,,DCSP01,4,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA GUGLIELMO MARCONI,tutti,,,,34,0,"a cavallo, non controllata (DCSP03 18, DCSP01 16); da punti di erogazione Neta"
+CASORATE PRIMO,VIA I MAGGIO,tutti,,,DCSP01,19,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA LARGO AVIS,tutti,,,DCSP03,1,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA LEONARDO DA VINCI,tutti,,,DCSP02,18,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA LUIGI GALVANI,tutti,,,DCSP01,20,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA LUXEMBURG,tutti,,,DCSP02,20,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MAGNAGHI,tutti,,,DCSP01,39,0,da punti di erogazione Neta
 CASORATE PRIMO,VIA MARCO BIAGI,tutti,,,DCSP02,2,0,da civici ANNCSU
-CASORATE PRIMO,VIA MATTEI,tutti,,,DCSP01,7,0,da prese Neta
-CASORATE PRIMO,VIA MICHELANGELO BUONARROTI,tutti,,,DCSP02,28,0,da prese Neta
-CASORATE PRIMO,VIA MILITE IGNOTO,tutti,,,DCSP01,2,0,da prese Neta
-CASORATE PRIMO,VIA MIRA,tutti,,,DCSP03,108,0,da prese Neta
-CASORATE PRIMO,VIA MONTE ADAMELLO,tutti,,,DCSP03,13,0,da prese Neta
-CASORATE PRIMO,VIA MONTE ASOLONE,tutti,,,DCSP03,14,0,da prese Neta
-CASORATE PRIMO,VIA MONTE BIANCO,tutti,,,DCSP03,5,0,da prese Neta
-CASORATE PRIMO,VIA MONTE GRAPPA,tutti,,,DCSP03,28,0,da prese Neta
-CASORATE PRIMO,VIA MONTE PASUBIO,tutti,,,DCSP03,16,0,da prese Neta
-CASORATE PRIMO,VIA MONTE ROSA,tutti,,,DCSP03,25,0,da prese Neta
-CASORATE PRIMO,VIA MOTTA VISCONTI,tutti,,,DCSP02,64,0,da prese Neta
-CASORATE PRIMO,VIA PALAZZO,tutti,,,DCSP03,25,0,da prese Neta
-CASORATE PRIMO,VIA PAPA GIOVANNI XXIII,tutti,,,DCSP02,1,0,da prese Neta
-CASORATE PRIMO,VIA PAVIA,tutti,,,DCSP03,8,0,da prese Neta
-CASORATE PRIMO,VIA PICCALUGA F.,tutti,,,DCSP03,15,0,da prese Neta
-CASORATE PRIMO,VIA PIONNIO,tutti,,,DCSP01,42,0,da prese Neta
-CASORATE PRIMO,VIA POZZETTI,tutti,,,DCSP01,37,0,da prese Neta
-CASORATE PRIMO,VIA RAFFAELLO SANZIO,tutti,,,DCSP02,3,0,da prese Neta
-CASORATE PRIMO,VIA RHO,tutti,,,DCSP03,12,0,da prese Neta
-CASORATE PRIMO,VIA SAN PROTASO,tutti,,,DCSP01,77,0,da prese Neta
-CASORATE PRIMO,VIA SAN SIRO,tutti,,,DCSP01,1,0,da prese Neta
-CASORATE PRIMO,VIA SANDRO PERTINI,tutti,,,DCSP01,119,0,da prese Neta
-CASORATE PRIMO,VIA SANTAGOSTINO,dispari,,91,DCSP01,11,0,via divisa tra distretti; da prese Neta
-CASORATE PRIMO,VIA SANTAGOSTINO,dispari,92,,DCSP03,16,0,via divisa tra distretti; da prese Neta
-CASORATE PRIMO,VIA SANTAGOSTINO,pari,,,DCSP03,43,1,via divisa tra distretti; da prese Neta
-CASORATE PRIMO,VIA SANTAGOSTINO,tutti,91,91,DCSP03,4,0,"eccezione: 4 prese al civico 91, da verificare; da prese Neta"
-CASORATE PRIMO,VIA SANTINI,tutti,,,DCSP03,15,0,da prese Neta
-CASORATE PRIMO,VIA TIZIANO,tutti,,,DCSP02,35,0,da prese Neta
-CASORATE PRIMO,VIA TOSI,tutti,,,DCSP03,139,0,da prese Neta
-CASORATE PRIMO,VIA VITTORIO EMANUELE II,tutti,,,DCSP01,93,0,da prese Neta
-CASORATE PRIMO,VIA XXV APRILE,tutti,,,DCSP01,98,0,da prese Neta
-CASORATE PRIMO,VICOLO CENTRALE,tutti,,,DCSP03,21,0,da prese Neta
-CASORATE PRIMO,VICOLO COMUNE,tutti,,,DCSP03,8,0,da prese Neta
-CASORATE PRIMO,VICOLO TERMANINI,tutti,,,DCSP01,7,1,da prese Neta
+CASORATE PRIMO,VIA MATTEI,tutti,,,DCSP01,7,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MICHELANGELO BUONARROTI,tutti,,,DCSP02,28,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MILITE IGNOTO,tutti,,,DCSP01,2,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MIRA,tutti,,,DCSP03,108,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE ADAMELLO,tutti,,,DCSP03,13,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE ASOLONE,tutti,,,DCSP03,14,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE BIANCO,tutti,,,DCSP03,5,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE GRAPPA,tutti,,,DCSP03,28,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE PASUBIO,tutti,,,DCSP03,16,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MONTE ROSA,tutti,,,DCSP03,25,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA MOTTA VISCONTI,tutti,,,DCSP02,64,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA PALAZZO,tutti,,,DCSP03,25,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA PAVIA,tutti,,,DCSP03,8,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA PICCALUGA F.,tutti,,,DCSP03,15,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA PIONNIO,tutti,,,DCSP01,42,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA POZZETTI,tutti,,,DCSP01,37,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA RAFFAELLO SANZIO,tutti,,,DCSP02,3,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA RHO,tutti,,,DCSP03,12,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA SAN PROTASO,tutti,,,DCSP01,77,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA SAN SIRO,tutti,,,DCSP01,1,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA SANDRO PERTINI,tutti,,,DCSP01,119,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA SANTAGOSTINO,dispari,,91,DCSP01,11,0,via divisa tra distretti; da punti di erogazione Neta
+CASORATE PRIMO,VIA SANTAGOSTINO,dispari,92,,DCSP03,16,0,via divisa tra distretti; da punti di erogazione Neta
+CASORATE PRIMO,VIA SANTAGOSTINO,pari,,,DCSP03,43,1,via divisa tra distretti; da punti di erogazione Neta
+CASORATE PRIMO,VIA SANTAGOSTINO,tutti,91,91,DCSP03,4,0,"eccezione: 4 punti di erogazione al civico 91, da verificare; da punti di erogazione Neta"
+CASORATE PRIMO,VIA SANTINI,tutti,,,DCSP03,15,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA TIZIANO,tutti,,,DCSP02,35,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA TOSI,tutti,,,DCSP03,139,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA VITTORIO EMANUELE II,tutti,,,DCSP01,94,0,da punti di erogazione Neta
+CASORATE PRIMO,VIA XXV APRILE,tutti,,,DCSP01,98,0,da punti di erogazione Neta
+CASORATE PRIMO,VICOLO CENTRALE,tutti,,,DCSP03,21,0,da punti di erogazione Neta
+CASORATE PRIMO,VICOLO COMUNE,tutti,,,DCSP03,8,0,da punti di erogazione Neta
+CASORATE PRIMO,VICOLO TERMANINI,tutti,,,DCSP01,7,1,da punti di erogazione Neta
 CASSOLNOVO,CNA MAGATTA,tutti,,,DCS02,3,0,da prese Neta
 CASSOLNOVO,PIAZZA CAMPARI,tutti,,,DCS02,1,0,da prese Neta
 CASSOLNOVO,PIAZZA CHIESA,tutti,,,DCS02,2,0,da prese Neta
