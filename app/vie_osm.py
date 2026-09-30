@@ -104,6 +104,22 @@ def vie_comune(comune: str) -> dict[str, list[np.ndarray]]:
         for f in json.loads(PERCORSO_VIE_OSM.read_text(encoding="utf-8"))["features"]:
             pr = f["properties"]
             vie.setdefault(pr["comune"], {}).setdefault(pr["nome"], []).append(np.asarray(f["geometry"]["coordinates"], dtype=float))
+        # Nomi OSM equivalenti (stessa strada scritta in modi diversi: "Via dei Baldacchini" e "Via del
+        # Baldacchini", "Via Stazione" e "Via della Stazione"): una strada sola, con i tratti sommati, sotto il
+        # nome con piu' tratti. Senza, i due nomi pareggiano e la via di Neta non si abbina (Daniele,
+        # 30/09/2026, Via Baldacchini a Cassolnovo).
+        for nomi_comune in vie.values():
+            gruppi: dict[tuple, list[str]] = {}
+            for nome in nomi_comune:
+                tipo, par = parole(nome)
+                if par:
+                    gruppi.setdefault((tipo, par), []).append(nome)
+            for nomi in gruppi.values():
+                if len(nomi) > 1:
+                    canonico = sorted(nomi, key=lambda n: (-len(nomi_comune[n]), n))[0]
+                    for n in nomi:
+                        if n != canonico:
+                            nomi_comune[canonico] = nomi_comune[canonico] + nomi_comune.pop(n)
         _CACHE.update(versione=versione, vie=vie)
     return _CACHE["vie"].get(comune.strip().upper(), {})
 
