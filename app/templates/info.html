@@ -7,6 +7,74 @@
   per il dettaglio tecnico completo vedi <code>project_docs/</code> nel repository.
 </p>
 
+<div class="panel" id="cerca-guida">
+  <label for="cerca-guida-input"><strong>Cerca nella guida</strong></label>
+  <input id="cerca-guida-input" type="search" autocomplete="off" placeholder="per esempio: interpolato, provvisorio, NODMA, sicura…"
+         style="display:block;width:100%;max-width:560px;margin:6px 0 8px;padding:8px 10px">
+  <div id="cerca-guida-risultati" class="testo-tenue"></div>
+</div>
+
+<div class="panel" id="glossario">
+  <h2>Glossario</h2>
+  <p class="nota-metodologica">Le parole che compaiono nelle pagine, con il loro significato in questa app.</p>
+  <dl class="glossario">
+    <dt id="g-reale">Reale</dt>
+    <dd>Volume ottenuto dalla <strong>differenza fisica tra due letture reali</strong> consecutive dello stesso contatore (Metodo B), ripartita sui mesi in proporzione ai giorni. È il dato più affidabile.</dd>
+    <dt id="g-provvisorio">Provvisorio</dt>
+    <dd>Volume dell'ultimo periodo di un contatore che <strong>non è ancora stato chiuso da una lettura reale</strong>: si usa il consumo dichiarato da Neta H2O (una stima). Quando arriva la lettura reale il periodo si ricalcola da solo e il provvisorio sparisce. Nella Home un mese è "Provvisorio" se più del 10% del volume è provvisorio; nell'invio a WMS un mese è segnato provvisorio se più del 2% del volume viene da stime non ancora chiuse.</dd>
+    <dt id="g-interpolato">Interpolato</dt>
+    <dd>Volume di un periodo in cui la lettura <strong>scende senza un cambio contatore dichiarato</strong> (un "reset di contatore non marcato"): la differenza non si può calcolare, e il volume si stima con il ritmo medio (m³/giorno) dello stesso contatore negli altri periodi validi. <strong>Non si corregge da solo</strong>: resta segnalato e va verificato con Neta H2O. Nella Home un mese o un periodo è "Interpolato" (rosso) solo se l'interpolato supera il 2% del volume; la quota vera è sempre nel tooltip.</dd>
+    <dt id="g-consolidato">Consolidato</dt>
+    <dd>Mese completo, con meno del 10% di provvisorio e meno del 2% di interpolato: il dato è affidabile. Non è lo stesso del <em>Consolidamento annuale</em> (vedi sotto).</dd>
+    <dt id="g-incompleto">Mese incompleto</dt>
+    <dd>Un mese il cui volume è sotto il 70% della mediana degli ultimi tre mesi non incompleti: dopo l'ultimo giro di letture del comune mancano ancora le letture di chiusura, quindi il volume è solo una frazione del normale. Non è una stima e non cambia i calcoli: quando arriva la lettura di chiusura il mese si corregge da solo. Non si invia a WMS.</dd>
+    <dt id="g-lettura-reale">Lettura reale / lettura stimata</dt>
+    <dd>La lettura <em>reale</em> è quella fatta sul contatore. Le <em>stimate</em> (STIMATA, RIPROPORZIONATA, SPEZZATURA) sono calcolate da Neta H2O: tra due letture reali non contano, perché la lettura reale successiva le conguaglia (le sostituisce, non si sommano).</dd>
+    <dt id="g-conguaglio">Conguaglio</dt>
+    <dd>Quando una lettura reale sostituisce le stime che la precedevano: il volume torna quello vero e il provvisorio sparisce.</dd>
+    <dt id="g-sentinella">Lettura sentinella</dt>
+    <dd>Valori come 999999 o 9999999: codici di Neta H2O per "lettura non disponibile", non consumi. Si scartano.</dd>
+    <dt id="g-metodo-b">Metodo B</dt>
+    <dd>L'unico metodo di calcolo dell'app: il volume è la differenza fisica tra letture reali consecutive, ripartita sui mesi per giorni. Un cambio di contatore interrompe sempre il confronto.</dd>
+    <dt id="g-import-wms">Import_WMS</dt>
+    <dd>La tabella dei volumi per distretto e mese (m³) che si invia a WMS SmartH2O. Un solo numero per distretto e mese.</dd>
+    <dt id="g-dp">DP (punto di erogazione)</dt>
+    <dd>Il contatore di un'utenza: nel file di Neta la colonna DP (<em>delivery point</em>). Non cambia mai, cambia solo l'utenza collegata. Non è la <em>presa</em> (l'allaccio fisico alla rete, che può servire più DP).</dd>
+    <dt id="g-distretto">Distretto (DMA)</dt>
+    <dd>Una zona della rete idrica, con un codice come DBLG02 o DCT05. Per ogni distretto si confronta l'acqua immessa con quella fatturata: è così che si trovano le perdite.</dd>
+    <dt id="g-nodma">NODMA / NO DISTRETTO</dt>
+    <dd>DP fuori da ogni distretto, per esempio case isolate in campagna. Non è sempre un errore: per molti DP è il valore giusto. Non entrano nei volumi per distretto.</dd>
+    <dt id="g-nd">ND / *</dt>
+    <dd>Distretto non indicato (<code>*</code> o vuoto) o anomalo nel file di Neta, per esempio il codice di un altro comune non associato. Da sistemare nella pagina Punti di erogazione.</dd>
+    <dt id="g-associabile">Distretto condiviso / comuni associabili</dt>
+    <dd>Un distretto che serve DP di più comuni (per esempio DBRN01 a Broni e Stradella). L'elenco dei comuni associabili sta in <code>distretti_comuni.csv</code>; per WMS il volume di un distretto condiviso si somma su tutti i comuni.</dd>
+    <dt id="g-conferma">Conferma, mantieni attuale, validato, recepito</dt>
+    <dd><em>Conferma</em>: il distretto scelto è quello giusto e va a Neta; entra subito nei volumi, anche nel passato. <em>Mantieni attuale</em>: il distretto che il DP ha già è giusto, il DP è <em>validato</em> e non va a Neta. <em>Recepito</em>: Neta ha già messo il distretto confermato.</dd>
+    <dt id="g-sicura">Sicura, da verificare, da decidere</dt>
+    <dd><em>Sicura</em>: almeno due fonti d'accordo, confermabile in blocco. <em>N su M fonti</em> o <em>1 fonte</em>: da guardare. <em>Da decidere</em>: non si sa in che distretto metterlo (nessuna proposta, fonti discordi, stesso nome in più frazioni…).</dd>
+    <dt id="g-fonti">Fonti (civico ANNCSU, stradario, via OSM, posizione)</dt>
+    <dd>Le informazioni indipendenti per capire il distretto di un DP. ✓ = la fonte concorda con la proposta, ✗ = dice un'altra cosa. <em>NODMA ✓</em> = la fonte dice che è fuori da ogni distretto. La riga <em>Non decidono</em> elenca le fonti controllate senza risposta e il perché.</dd>
+    <dt id="g-anncsu">ANNCSU</dt>
+    <dd>L'archivio nazionale dei numeri civici e delle strade (Agenzia delle Entrate e ISTAT), con la posizione di ogni civico registrata dal Comune. È la fonte più affidabile per il distretto dall'indirizzo, dove i civici sono posizionati.</dd>
+    <dt id="g-osm">OSM (OpenStreetMap)</dt>
+    <dd>La mappa libera del mondo. L'app usa il tracciato delle vie: se una via sta quasi tutta (almeno il 90%) in un distretto, anche questa fonte dice quale.</dd>
+    <dt id="g-stradario">Stradario</dt>
+    <dd>La tabella che dice in quale distretto sta ogni via (o ogni tratto di via), costruita dai civici ANNCSU o dai DP di Neta. Una via "a cavallo" sta in più distretti e non dà una risposta.</dd>
+    <dt id="g-coordinata-calcolata">Coordinata calcolata, a metà via</dt>
+    <dd>Quando la coordinata di Neta è sbagliata l'app ne calcola una migliore (dal civico ANNCSU o da una stima affidabile). Se si conosce solo la via, il DP si mette <em>a metà via</em> (puntino vuoto e tratteggiato). Le coordinate di Neta non si modificano mai.</dd>
+    <dt id="g-consolidamento">Consolidamento annuale</dt>
+    <dd>A fine anno si salva una copia fissa del bilancio: da quel momento i mesi di quell'anno non cambiano più, qualunque cosa succeda. Non è lo stato "Consolidato" di un mese.</dd>
+  </dl>
+</div>
+
+<style>
+  dl.glossario dt { font-weight: 600; margin-top: 12px; }
+  dl.glossario dd { margin: 2px 0 0 0; }
+  .trovato { background: rgba(255, 210, 0, 0.30); outline: 2px solid rgba(214, 160, 0, 0.8); border-radius: 4px; transition: background 0.4s; }
+  #cerca-guida-risultati a { display: block; padding: 4px 0; text-decoration: none; }
+  #cerca-guida-risultati mark { background: rgba(255, 210, 0, 0.55); padding: 0 1px; }
+</style>
+
 <div class="panel">
   <h2>Cos'è questa applicazione</h2>
   <p>
@@ -457,4 +525,73 @@
       per aprire il dettaglio con indirizzo e cronologia letture.</li>
   </ul>
 </div>
+
+<script>
+(function () {
+  // Ricerca nella guida (Daniele, 30/09/2026): scrivi una parola e i risultati indicano dove se ne parla; un clic porta li'.
+  const norm = t => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const input = document.getElementById('cerca-guida-input');
+  const out = document.getElementById('cerca-guida-risultati');
+  const box = document.getElementById('cerca-guida');
+  const principale = document.querySelector('main');
+  // Blocchi ricercabili: voci del glossario (termine + definizione insieme), paragrafi, elenchi, titoli dei riquadri.
+  const blocchi = [];
+  principale.querySelectorAll('dd, p, li, summary').forEach(function (el) {
+    if (box.contains(el) || el.closest('nav')) return;
+    let titolo = '', testo = el.textContent.replace(/\s+/g, ' ').trim();
+    if (el.tagName === 'DD') {
+      const dt = el.previousElementSibling;
+      titolo = dt ? dt.textContent.trim() : '';
+      testo = titolo + ' — ' + testo;
+    } else {
+      let n = el;
+      while (n && n !== principale && !titolo) {
+        let p = n.previousElementSibling;
+        while (p && !titolo) { if (/^H[23]$/.test(p.tagName)) titolo = p.textContent.trim(); p = p.previousElementSibling; }
+        if (!titolo) n = n.parentElement;
+      }
+      if (!titolo) { const h = el.closest('.panel') && el.closest('.panel').querySelector('h2'); titolo = h ? h.textContent.trim() : ''; }
+    }
+    if (testo.length > 2) blocchi.push({ el: el, titolo: titolo || 'Guida', testo: testo, n: norm(testo), glossario: !!el.closest('#glossario') });
+  });
+
+  function snippet(b, q) {
+    const i = b.n.indexOf(q);
+    const da = Math.max(0, i - 50), a = Math.min(b.testo.length, i + q.length + 90);
+    const pezzo = b.testo.slice(da, a);
+    const k = i - da;
+    return (da > 0 ? '…' : '') + esc(pezzo.slice(0, k)) + '<mark>' + esc(pezzo.slice(k, k + q.length)) + '</mark>' + esc(pezzo.slice(k + q.length)) + (a < b.testo.length ? '…' : '');
+  }
+
+  function vai(b) {
+    const d = b.el.closest('details');
+    if (d) d.open = true;
+    b.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    b.el.classList.add('trovato');
+    setTimeout(() => b.el.classList.remove('trovato'), 3500);
+  }
+
+  let trovati = [];
+  function cerca() {
+    const q = norm(input.value.trim());
+    trovati = [];
+    if (q.length < 2) { out.innerHTML = ''; return; }
+    // Prima le voci del glossario, poi il resto, nell'ordine della pagina.
+    const tutti = blocchi.filter(b => b.n.includes(q));
+    trovati = tutti.filter(b => b.glossario).concat(tutti.filter(b => !b.glossario)).slice(0, 15);
+    out.innerHTML = trovati.length
+      ? trovati.map((b, i) => `<a href="#" data-i="${i}"><strong>${esc(b.titolo)}</strong> <span>${snippet(b, q)}</span></a>`).join('')
+      : `Nessun risultato per «${esc(input.value.trim())}».`;
+  }
+  input.addEventListener('input', cerca);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && trovati.length) { e.preventDefault(); vai(trovati[0]); } });
+  out.addEventListener('click', function (e) {
+    const a = e.target.closest('a[data-i]');
+    if (!a) return;
+    e.preventDefault();
+    vai(trovati[Number(a.dataset.i)]);
+  });
+})();
+</script>
 {% endblock %}

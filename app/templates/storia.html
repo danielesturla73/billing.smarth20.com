@@ -476,6 +476,10 @@
     <li><strong>Home: selettore del mese o del periodo</strong>: la mappa e la tabella dei comuni mostravano solo l'ultimo mese. Ora accanto a "Colora per" ci sono due menu, <em>Mese</em> e <em>fino a</em>:
       senza scelta l'ultimo mese disponibile di ogni comune (come prima), con un mese quel mese, con due il periodo, con i volumi sommati e le quote reale/provvisorio/interpolato ricalcolate sulla somma (un periodo con un mese
       incompleto risulta "Incompleto"). Cambiano i colori della mappa, il tooltip e le colonne mese, volume e dati della tabella; le segnalazioni aperte restano quelle di oggi. Mesi disponibili: da 2026-01 a 2026-06.</li>
+    <li><strong>"Interpolato" solo sopra il 2%, e glossario con ricerca nella Guida</strong>: nella Home un mese o un comune risultava "Interpolato" (rosso) per qualsiasi quota sopra zero, e 13 comuni su 22 lo erano con quote tra lo 0,00% e
+      l'1,3% (Robbio 1,1 m³ su 32.752, Casorate Primo 0,05%). Ora il rosso scatta solo se l'interpolato supera il 2% del volume (la stessa soglia del provvisorio nell'invio a WMS); la quota vera resta nei tooltip. Nessun comune di oggi supera il 2%.
+      Cassolnovo ad aprile 2026 non ha interpolato (0 m³): compare solo da novembre 2025 a febbraio 2026, in DCS02, tra lo 0,2 e lo 0,4%. La Guida ha un nuovo <em>Glossario</em> di 23 voci (Reale, Provvisorio, Interpolato, Consolidato, Mese incompleto, NODMA, sicura,
+      fonti, ANNCSU, OSM, stradario, consolidamento…) e una casella <em>Cerca nella guida</em>: scrivi una parola e i risultati dicono dove se ne parla, con un frammento; un clic porta al punto e lo evidenzia.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la

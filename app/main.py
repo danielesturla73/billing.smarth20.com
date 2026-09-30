@@ -1461,13 +1461,19 @@ def _mesi_incompleti(volumi_distretto_mese: pd.DataFrame) -> list[str]:
     return incompleti
 
 
+# Un mese o un periodo e' "Interpolato" solo se la quota interpolata supera questa soglia (Daniele, 30/09/2026): prima
+# bastava qualsiasi valore sopra zero e 13 comuni su 22 risultavano "Interpolato" con quote dello 0,05%. La quota vera
+# resta scritta nei tooltip e nelle tabelle. Stessa soglia dell'invio a WMS per il provvisorio.
+SOGLIA_INTERPOLATO_PCT = 2.0
+
+
 def _stato_dato(pct_provvisorio, pct_interpolato, incompleto: bool = False) -> str:
     """Stessa regola di colore del tema "Affidabilita'" della mappa
-    (mappa.html): incompleto > interpolato > provvisorio (oltre il 10%) >
-    consolidato."""
+    (mappa.html): incompleto > interpolato (oltre SOGLIA_INTERPOLATO_PCT) >
+    provvisorio (oltre il 10%) > consolidato."""
     if incompleto:
         return "incompleto"
-    if pct_interpolato and pct_interpolato > 0:
+    if pct_interpolato and pct_interpolato > SOGLIA_INTERPOLATO_PCT:
         return "interpolato"
     if pct_provvisorio and pct_provvisorio > 10:
         return "provvisorio"
@@ -1559,6 +1565,7 @@ def pagina_mappa(request: Request):
     mesi_disponibili = sorted({m for v in dati_tematici.values() for m in v.get("per_mese", {})}, reverse=True)
     return templates.TemplateResponse(request, "mappa.html", {
         "mesi_disponibili": mesi_disponibili,
+        "soglia_interpolato": SOGLIA_INTERPOLATO_PCT,
         "request": request,
         "pagina_attiva": "mappa",
         "comuni_disponibili": comuni_disponibili,

@@ -73,6 +73,7 @@
   const GEOJSON = {{ geojson_demo | tojson }};
   const DATI = {{ dati_tematici | tojson }};
   const normalizza = t => (t || '').trim().toUpperCase();
+  const SOGLIA_INTERPOLATO = {{ soglia_interpolato | tojson }};  // % oltre la quale un mese/periodo e' "Interpolato"
   const COMUNI_CARICATI = new Set({{ comuni_tabella | map(attribute='comune') | list | tojson }}.map(normalizza));
 
   // Palette WMS SmartH2O (le stesse variabili di style.css, ripetute qui
@@ -132,7 +133,7 @@
   const NON_DISTRETTI = ['NODMA', 'ND'];
   function statoDato(pProv, pInterp, incompleto) {
     if (incompleto) return 'incompleto';
-    if (pInterp > 0) return 'interpolato';
+    if (pInterp > SOGLIA_INTERPOLATO) return 'interpolato';
     if (pProv > 10) return 'provvisorio';
     return 'consolidato';
   }
@@ -170,13 +171,13 @@
       colore: function (v) {
         if (!v || v.volume == null) return GRIGIO_NEUTRO;
         if (v.incompleto) return GRIGIO_INCOMPLETO;
-        if (v.pct_interpolato > 0) return ROSSO;
+        if (v.pct_interpolato > SOGLIA_INTERPOLATO) return ROSSO;
         if (v.pct_provvisorio > 10) return AMBRA;
         return VERDE;
       },
       legenda: [
         [VERDE, 'Consolidato'], [AMBRA, 'Parzialmente provvisorio'],
-        [ROSSO, 'Contiene interpolato'], [GRIGIO_INCOMPLETO, 'Mese incompleto'], [GRIGIO_NEUTRO, 'Nessun dato'],
+        [ROSSO, `Interpolato oltre il ${SOGLIA_INTERPOLATO}%`], [GRIGIO_INCOMPLETO, 'Mese incompleto'], [GRIGIO_NEUTRO, 'Nessun dato'],
       ],
     },
     volume: {

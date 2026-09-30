@@ -5,7 +5,7 @@
   {% if stato_comune == 'incompleto' %}<span class="badge nodata" title="Volume dell'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Ultimo mese incompleto</span>
   {% elif stato_comune == 'consolidato' %}<span class="badge real">Consolidato</span>
   {% elif stato_comune == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
-  {% elif stato_comune == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Contiene interpolato</span>
+  {% elif stato_comune == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)" title="Più del 2% dell'ultimo mese è interpolato (reset di contatore non marcato): da verificare con Neta H2O">Interpolato oltre il 2%</span>
   {% endif %}
 </h1>
 <p class="nota-metodologica">
