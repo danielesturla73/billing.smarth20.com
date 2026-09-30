@@ -634,19 +634,22 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
         # resta visibile ma non e' mai CONCORDI: la decide l'utente.
         # Si legge "civico ANNCSU NODMA ✓" (Daniele, 30/09/2026): il civico ha il suo valore,
         # NODMA, e il ✓ dice che la fonte c'e'. Che la proposta sia un distretto e non
-        # NODMA lo dice CIVICO_NODMA_CONTRO (l'etichetta "da decidere"), non il segno.
+        # NODMA lo dice NODMA_CONTRO_DA (l'etichetta "da decidere"), non il segno.
         elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NODMA" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
                   ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
                   ("posizione", c if d is None and not u else ""),
                   # frazione tutta NO DISTRETTO: dissente da una proposta con un distretto
-                  ("resto della frazione", "NO DISTRETTO" if r["FRAZIONE_ND"] and r["PROPOSTA"] else "")]
+                  ("resto della frazione", "NODMA" if r["FRAZIONE_ND"] and r["PROPOSTA"] else "")]
         elenco = [(n, x) for n, x in elenco if x]
-        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] or (n == 'civico ANNCSU' and x == 'NODMA') else '✗'}" for n, x in elenco))
-        civico_contro.append(bool(r["CIVICO_FUORI"] and r["PROPOSTA"] and not r["D_CIVICO"]))
+        # Una fonte che dice NODMA si legge sempre col ✓ (c'e' e dice NODMA): che la
+        # proposta sia un distretto lo dice l'etichetta "da decidere" (NODMA_CONTRO_DA).
+        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] or x == 'NODMA' else '✗'}" for n, x in elenco))
+        contro = [nome for nome, cond in (("il civico", r["CIVICO_FUORI"] and not r["D_CIVICO"]), ("la frazione", r["FRAZIONE_ND"])) if cond and r["PROPOSTA"]]
+        civico_contro.append(" e ".join(contro))
         concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
     p["FONTI"] = fonti
     p["CONCORDI"] = concordi
-    p["CIVICO_NODMA_CONTRO"] = civico_contro
+    p["NODMA_CONTRO_DA"] = civico_contro  # "il civico", "la frazione", "il civico e la frazione" o ""
 
     # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):
     # un DP che Neta ha NO DISTRETTO e per cui nessuna fonte indica un distretto
