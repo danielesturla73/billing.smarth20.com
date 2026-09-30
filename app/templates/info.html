@@ -401,8 +401,13 @@
   <p><strong>Corrispondenze manuali delle vie.</strong> Dove il nome di una via di Neta non si può abbinare in nessun modo a OpenStreetMap o ad ANNCSU (nome di battesimo sbagliato, nome
     diverso) si aggiunge una riga a <code>project_docs/vie_alias.csv</code>: comune, via di Neta (senza civico, in maiuscolo) e nome di riferimento (esatto, come in OSM o ANNCSU). Le righe
     che iniziano con # sono commenti. Oggi c'è una riga, per Via Alessandro Lamarmora a Cava Manara (in OSM "Via Alberto Lamarmora").</p>
-  <p><strong>Google Maps.</strong> In ogni riga dell'elenco il link <em>Google Maps</em> apre Google Maps sull'indirizzo del DP, in un'altra scheda: serve a
-    controllare a mano dove sta il civico dove ANNCSU non ha la posizione. Accanto c'è <em>punto di Neta</em>, che apre Google Maps sulla coordinata originale: serve nelle frazioni, dove la ricerca per indirizzo non trova la via (a Certosa di Pavia la Via Cavour sta a Torriano). Se <em>📍 mostra la via</em> non trova la via, sotto l'indirizzo compare un messaggio con gli stessi link. È solo un collegamento: l'app non chiede né salva niente a Google.</p>
+  <p><strong>Che posizione è il puntino.</strong> Sulla mappa il puntino di un DP è di tre tipi: <em>senza anello</em>, la coordinata di Neta; <em>con anello verde scuro</em>, una
+    coordinata calcolata dall'app (civico ANNCSU o altra stima affidabile); <em>vuoto e tratteggiato</em>, a metà via (si conosce solo la via). Nella riga, per i DP con coordinata
+    calcolata, il bottone <em>punto di Neta</em> mostra sulla mappa dell'app anche dove Neta lo mette, con un tratteggio fino al puntino. Il badge <em>📍 coord. calcolata</em> nella riga
+    dice quale tipo è e da dove viene.</p>
+  <p><strong>Google Maps.</strong> Si apre solo quando <em>📍 mostra la via</em> non trova la via né in OpenStreetMap né in ANNCSU: sotto l'indirizzo compare il messaggio "Via non trovata" con i
+    link <em>Cerca su Google Maps</em> (per indirizzo) e <em>punto di Neta su Google Maps</em> (per coordinata, utile nelle frazioni: a Certosa di Pavia la Via Cavour sta a Torriano). Nelle righe
+    normali non ci sono link a Google. È solo un collegamento: l'app non chiede né salva niente a Google.</p>
   <p><strong>Vie da verificare.</strong> Un file di controllo dei nomi (link "Vie da verificare", Excel): le vie e le frazioni di Neta che non si abbinano a
     OpenStreetMap o ad ANNCSU, o si abbinano in modo ambiguo, con i nomi simili e i DP ancora da confermare. Non modifica niente. Serve a
     trovare i refusi, i nomi scritti in modo diverso, le vie che mancano in OSM o in ANNCSU. La prima volta ci vuole circa un minuto.</p>

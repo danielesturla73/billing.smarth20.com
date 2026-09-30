@@ -1796,7 +1796,7 @@ def pagina_prese(request: Request, comune: str | None = None, vista: str = "asse
             "CHIAVE", "DP", "INDIRIZZO", "CAP", "SERVIZI", "N_SERVIZI", "DISTRETTO", "MOTIVO",
             "LAT", "LON", "COORD_VALIDE", "PROPOSTA", "DISTANZA_M", "CONFERMATO", "CONFERMATO_DA",
             "CONFERMATO_IL", "RECEPITO", "DISTRETTO_VIA", "N_INVII", "ULTIMO_INVIO", "PROPOSTA_DA", "VALIDATA", "FONTI", "CONCORDI", "ORIGINE", "NOTA",
-            "LAT_SIS", "LON_SIS", "FONTE_SIS", "AFF_SIS", "NODMA_CONTRO_DA",
+            "LAT_SIS", "LON_SIS", "FONTE_SIS", "AFF_SIS", "NODMA_CONTRO_DA", "OMONIMA",
         ])
     return templates.TemplateResponse(request, "prese.html", contesto)
 

@@ -367,7 +367,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const marcatori = new Map();
   RIGHE.forEach(function (r) {
     if (!r.COORD_VALIDE) return;
-    const m = L.circleMarker([r.LAT, r.LON], { radius: 6, weight: 1.5, color: '#fff', fillColor: colore(r), fillOpacity: 0.95 });
+    const m = L.circleMarker([r.LAT, r.LON], stileMarcatore(r, false));
     // Stessa proposta dell'elenco (prima la via, poi la posizione).
     m.bindTooltip(() => `<strong class="mono">${esc(r.DP || 'servizio ' + r.SERVIZI)}</strong><br>${esc(r.INDIRIZZO)}<br>` +
         (MOTIVO_TESTO[r.MOTIVO] ? `${esc(MOTIVO_TESTO[r.MOTIVO])}<br>` : '') +
@@ -382,11 +382,22 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   });
   const stratoPunti = L.featureGroup([...marcatori.values()]).addTo(mappa);
 
+  // Che posizione e' il puntino (Daniele, 30/09/2026): senza anello = la coordinata di Neta; anello verde scuro =
+  // coordinata calcolata dall'app (alta o media); vuoto e tratteggiato = a meta' via (approssimata, si conosce
+  // solo la via). Il DP selezionato ha il bordo blu scuro spesso.
+  function stileMarcatore(r, sel) {
+    const s = { fillColor: colore(r), radius: sel ? 10 : 6, fillOpacity: 0.95, color: '#fff', weight: 1.5, dashArray: null };
+    if (r.AFF_SIS === 'approssimata') { s.fillOpacity = 0.3; s.color = colore(r); s.weight = 2; s.dashArray = '3 3'; }
+    else if (r.AFF_SIS) { s.color = '#0A5C63'; s.weight = 2.5; }
+    if (sel) { s.color = '#0F2438'; s.weight = 3; }
+    return s;
+  }
+
   function aggiornaMarcatore(r) {
     const m = marcatori.get(r.CHIAVE);
     if (!m) return;
     const sel = r.CHIAVE === selezionata;
-    m.setStyle({ fillColor: colore(r), radius: sel ? 10 : 6, color: sel ? '#0F2438' : '#fff', weight: sel ? 3 : 1.5 });
+    m.setStyle(stileMarcatore(r, sel));
     if (sel) m.bringToFront();
   }
 
@@ -395,7 +406,10 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     [VIOLA, 'Distretto diverso dalla posizione'], [BLU, 'Distretto soppresso (fuso)'], [ARANCIO, 'Via di altro distretto'], [VERDE, 'Confermata'],
   ].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') +
     '<span><i style="border:2px solid #0A5C63;background:none"></i>Distretti del comune</span>' +
-    '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
+    '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>' +
+    '<span><i style="border:2.5px solid #0A5C63;background:#8B9DA6"></i>Puntino con anello verde: coordinata calcolata dall\'app</span>' +
+    '<span><i style="border:2px dashed #8B9DA6;background:none"></i>Puntino vuoto e tratteggiato: a metà via (si conosce solo la via)</span>' +
+    '<span><i style="border:1.5px solid #fff;background:#8B9DA6"></i>Puntino senza anello: coordinata di Neta</span>';
 
   function kpi() {
     // Aperte = ancora da confermare (Daniele, 30/09/2026): quelle confermate ma non
@@ -433,6 +447,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     if (sicura(r)) return { classe: 'sicura', badge: 'real', testo: `✓ sicura · ${tot} su ${tot}`, perche: 'Almeno due fonti e tutte concordano: confermabile in blocco.' };
     // "da decidere" (Daniele, 30/09/2026): non si sa in che distretto metterla,
     // non e' una questione di conteggio delle fonti.
+    // Stesso nome di strada in piu' frazioni (Gambolo': Via Gambolo' e Fraz. Cason Peri-Via Gambolo'): in OSM e
+    // ANNCSU le due strade hanno lo stesso nome e le fonti si mescolano: mai "sicura", si decide a mano.
+    if (r.OMONIMA && r.PROPOSTA) return { classe: 'discordi', badge: 'discordi', testo: 'da decidere · stesso nome in più frazioni', perche: 'Nello stesso comune ci sono due strade con questo nome in frazioni diverse: in OpenStreetMap e in ANNCSU si chiamano uguale e le fonti (tracciato, civici) si mescolano. La proposta è solo un indizio: guarda la mappa.' };
     // Una fonte (civico ANNCSU, resto della frazione) dice NODMA (✓ nelle Fonti: la fonte c'e') ma la proposta e' un distretto.
     if (r.NODMA_CONTRO_DA) return { classe: 'discordi', badge: 'discordi', testo: `da decidere · ${r.NODMA_CONTRO_DA} ${r.NODMA_CONTRO_DA.includes(' e ') ? 'dicono' : 'dice'} NODMA`, perche: `${r.NODMA_CONTRO_DA[0].toUpperCase() + r.NODMA_CONTRO_DA.slice(1)} dice NODMA (fuori da ogni distretto) e la proposta è un distretto: non è confermabile in blocco.` };
     if (!r.PROPOSTA) return { classe: 'discordi', badge: 'discordi', testo: 'da decidere · nessuna proposta', perche: 'Nessuna fonte propone un distretto: da assegnare a mano.' };
@@ -491,8 +508,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>
       <div>${esc(r.INDIRIZZO)} <button type="button" class="btn-link azione-via" title="Mostra in mappa dove sta la via (e il civico), non il punto">📍 mostra la via</button>
-        <a class="btn-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(r.INDIRIZZO).trim() + ', ' + COMUNE + ', Italia')}" title="Apre Google Maps sull'indirizzo, in un'altra scheda: per controllare a mano dove sta il civico">Google Maps</a>
-        ${r.NETA_VALIDA ? `<a class="btn-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${r.LAT_NETA},${r.LON_NETA}" title="Apre Google Maps sul punto di Neta (la coordinata originale): utile quando la ricerca per indirizzo non trova la via, per esempio nelle frazioni">punto di Neta</a>` : ''}</div>
+        ${r.AFF_SIS && r.NETA_VALIDA ? `<button type="button" class="btn-link azione-neta" title="Il puntino e' una coordinata calcolata dall'app: mostra sulla mappa anche dove Neta lo mette">punto di Neta</button>` : ''}</div>
       <div class="testo-tenue">${r.N_SERVIZI === 1 ? 'Servizio' : r.N_SERVIZI + ' servizi'}: <span class="mono">${esc(r.SERVIZI)}</span></div>
       <div>${testoProposta(r)}</div>
       ${conferma}${modulo}
@@ -533,6 +549,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
 
   function seleziona(chiave, daMappa) {
     selezionata = chiave;
+    stratoNeta.clearLayers();
     document.querySelectorAll('.riga-presa').forEach(el => el.classList.toggle('selezionata', el.dataset.chiave === chiave));
     RIGHE.forEach(aggiornaMarcatore);
     const el = document.querySelector(`.riga-presa[data-chiave="${CSS.escape(chiave)}"]`);
@@ -580,7 +597,17 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     let el = riga.querySelector('.avviso-via');
     if (!el) { el = document.createElement('div'); el.className = 'avviso-via testo-tenue'; bottone.parentElement.after(el); }
     el.innerHTML = testo ? `${esc(testo)} <a href="${urlGoogleMaps(r)}" target="_blank" rel="noopener"><strong>Cerca su Google Maps ↗</strong></a>` +
-      (r.NETA_VALIDA ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${r.LAT_NETA},${r.LON_NETA}" target="_blank" rel="noopener">punto di Neta ↗</a>` : '') : '';
+      (r.NETA_VALIDA ? ` · <a href="https://www.google.com/maps/search/?api=1&query=${r.LAT_NETA},${r.LON_NETA}" target="_blank" rel="noopener">punto di Neta su Google Maps ↗</a>` : '') : '';
+  }
+  // Il punto originale di Neta sulla mappa dell'app, con un tratteggio fino al puntino calcolato.
+  const stratoNeta = L.layerGroup().addTo(mappa);
+  function mostraPuntoNeta(r) {
+    stratoNeta.clearLayers();
+    const neta = [r.LAT_NETA, r.LON_NETA];
+    L.polyline([[r.LAT, r.LON], neta], { color: '#B3261E', weight: 2, dashArray: '4 4' }).addTo(stratoNeta);
+    L.circleMarker(neta, { radius: 9, weight: 3, color: '#B3261E', fillColor: '#fff', fillOpacity: 0.9 })
+      .bindTooltip('Punto di Neta', { permanent: true, direction: 'top' }).addTo(stratoNeta);
+    mappa.fitBounds(L.latLngBounds([[r.LAT, r.LON], neta]), { padding: [60, 60], maxZoom: 18 });
   }
   async function mostraVia(r, bottone) {
     stratoVia.clearLayers();
@@ -628,6 +655,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
     } else if (e.target.classList.contains('azione-togli')) {
       invia([{ chiave: chiave, distretto: '' }]);
+    } else if (e.target.classList.contains('azione-neta')) {
+      seleziona(chiave, false);
+      mostraPuntoNeta(perChiave.get(chiave));
     } else if (e.target.classList.contains('azione-via')) {
       seleziona(chiave, false);
       mostraVia(perChiave.get(chiave), e.target);

@@ -449,6 +449,8 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     p["D_OSM"] = [osm_via.get(v, "") for v in vie_norm]
     osm_fuori = _osm_fuori(comune, vie_norm)
     p["OSM_FUORI"] = [v in osm_fuori for v in vie_norm]
+    omonime = _vie_omonime(vie_norm)
+    p["OMONIMA"] = [v in omonime for v in vie_norm]
     # Frazione tutta NO DISTRETTO (Daniele, 30/09/2026, Casa Bernini a Broni: 27
     # DP tutti NO DISTRETTO, uno a 117 m da un confine riceveva la proposta
     # DBRN05). Vale solo per le frazioni, non per le vie: il DP e' in una frazione
@@ -572,6 +574,34 @@ SOGLIA_OSM_FUORI = 0.95
 _RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
 
 MIN_DP_FRAZIONE = 2
+
+_RE_FRAZ_PREFISSO = re.compile(r"^(?:FRAZ(?:IONE)?\.?|FR\.?)\s*([^-]+?)\s*-\s*(.+)$")
+_RE_FRAZ_SUFFISSO = re.compile(r"^(.+?)\s*(?:-\s*)?(?:FRAZ(?:IONE)?\.?|FR\.)\s*(.+)$")
+
+
+def _strada_e_frazione(via: str) -> tuple[str, str]:
+    """('VIA GAMBOLO'', 'CASON PERI') da "FRAZ. CASON PERI-VIA GAMBOLO'"; ('VIA MULINO', 'STRADELLA') da
+    "VIA MULINO - FRAZ. STRADELLA"; ('VIA ROMA', '') se non c'e' la frazione."""
+    m = _RE_FRAZ_PREFISSO.match(via)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
+    m = _RE_FRAZ_SUFFISSO.match(via)
+    if m:
+        return m.group(1).strip(" -"), m.group(2).strip()
+    return via, ""
+
+
+def _vie_omonime(vie: list[str]) -> set[str]:
+    """Le vie di Neta (indirizzo senza civico) il cui nome di strada compare in piu' localita' del comune
+    (Gambolo': VIA GAMBOLO' e FRAZ. CASON PERI-VIA GAMBOLO'; VIA MULINO e VIA MULINO - FRAZ. STRADELLA).
+    Sono strade diverse con lo stesso nome: in OSM e in ANNCSU si chiamano uguale, quindi i tracciati e i civici
+    si mescolano e le fonti non sono affidabili (Daniele, 30/09/2026)."""
+    gruppi: dict[str, set[tuple[str, str]]] = {}
+    for v in set(vie):
+        strada, frazione = _strada_e_frazione(v)
+        if re.match(r"^(VIA|VIALE|VICOLO|STRADA|PIAZZA|PIAZZALE|LARGO|CORSO)\b", strada):
+            gruppi.setdefault(strada, set()).add((v, frazione))
+    return {v for varianti in gruppi.values() if len({f for _, f in varianti}) > 1 for v, _ in varianti}
 
 # Una riga dello stradario poggiata su tanti DP o meno e' "debole" (vedi _prese_comune).
 MAX_DP_STRADARIO_DEBOLE = 2
@@ -709,6 +739,9 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
         concordi.append(bool(pr) and len(elenco) >= 2 and all(x == pr or (x == "NODMA" and pr_nodma) for _, x in elenco))
     p["FONTI"] = fonti
     p["CONCORDI"] = concordi
+    # Stesso nome di strada in piu' frazioni: le fonti mescolano le due strade, quindi non e' mai "sicura"
+    # (la proposta resta visibile e si decide a mano).
+    p["CONCORDI"] = p["CONCORDI"] & ~p["OMONIMA"]
     p["NODMA_CONTRO_DA"] = civico_contro  # fonti che dicono NODMA contro una proposta con un distretto ("il civico e la posizione"...) o ""
 
     # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):
