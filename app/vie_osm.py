@@ -168,13 +168,16 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     del nome Neta devono stare tutte in quello OSM (VIA CRIMINALI ->
     Via Gerolamo Criminali); tra piu' candidati vince quello con meno parole
     in piu', a parita' quello dello stesso tipo; se resta un pareggio la
-    via non si abbina."""
+    via non si abbina. Se non si trova niente e il nome Neta ha una localita'
+    dopo " - " ("VIA F. TURATI - TRE RE", "VIA E.FERMI - MEZZANA CORTI") si
+    riprova senza (Daniele, 30/09/2026, Cava Manara)."""
     osm = [(n, *parole(n)) for n in nomi_osm]
     esito = {}
-    for via in vie_neta:
+
+    def cerca(via: str):
         tipo, pv = parole(via)
         if not pv:
-            continue
+            return None
         candidati = []
         for nome, t_osm, po in osm:
             po_nome = po - {"PRIVATA"}  # il nome OSM contenuto in quello Neta (Strada Privata M. Sironi = VIA MARIO SIRONI)
@@ -191,11 +194,18 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
                 identico = 0 if nome.upper().strip() == via.upper().strip() else 1
                 candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, identico, nome))
         if not candidati:
-            continue
+            return None
         candidati.sort()
         if len(candidati) > 1 and candidati[0][:4] == candidati[1][:4]:
-            continue
-        esito[via] = candidati[0][4]
+            return "AMBIGUA"
+        return candidati[0][4]
+
+    for via in vie_neta:
+        trovato = cerca(via)
+        if trovato is None and " - " in via:
+            trovato = cerca(via.split(" - ")[0])
+        if trovato and trovato != "AMBIGUA":
+            esito[via] = trovato
     return esito
 
 
