@@ -592,7 +592,10 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       const valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
       if (!valore) { alert('Scrivi o scegli un distretto.'); return; }
       const r = perChiave.get(chiave);
-      invia([{ chiave: chiave, distretto: valore, origine: valore === r.PROPOSTA ? 'proposta' : 'manuale' }]);
+      // Il distretto che il DP ha gia' (per esempio NO DISTRETTO) non e' una conferma
+      // di un distretto nuovo: e' "mantieni attuale", validato e non va a Neta.
+      if (valore === r.DISTRETTO && mantenibile(r)) invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
+      else invia([{ chiave: chiave, distretto: valore, origine: valore === r.PROPOSTA ? 'proposta' : 'manuale' }]);
     } else if (e.target.classList.contains('azione-mantieni')) {
       const r = perChiave.get(chiave);
       invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
@@ -616,7 +619,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   });
   const bottone = document.getElementById('conferma-proposte');
   if (bottone) bottone.addEventListener('click', function () {
-    const voci = visibili().filter(sicura).map(r => ({ chiave: r.CHIAVE, distretto: r.PROPOSTA, origine: 'proposta' }));
+    const voci = visibili().filter(sicura).map(r => r.PROPOSTA === r.DISTRETTO && mantenibile(r)
+      ? { chiave: r.CHIAVE, distretto: r.DISTRETTO, validata: true }
+      : { chiave: r.CHIAVE, distretto: r.PROPOSTA, origine: 'proposta' });
     if (voci.length && confirm(`Confermo il distretto proposto per ${voci.length} punti di erogazione su cui tutte le fonti concordano?`)) invia(voci);
   });
   document.querySelectorAll('.f-motivo, #f-stato').forEach(el => el.addEventListener('change', disegna));

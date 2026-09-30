@@ -423,8 +423,11 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     if len(cv):
         fuori = np.array(_dentro_confini(p["CIV_LAT"].to_numpy(dtype=float)[cv], p["CIV_LON"].to_numpy(dtype=float)[cv])) == ""
         p.iloc[cv[fuori], p.columns.get_loc("CIVICO_FUORI")] = True
-    osm_via = _distretto_osm_unico(comune, [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]])
-    p["D_OSM"] = [osm_via.get(stradario.normalizza_indirizzo(i)[0], "") for i in p["INDIRIZZO"]]
+    vie_norm = [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]]
+    osm_via = _distretto_osm_unico(comune, vie_norm)
+    p["D_OSM"] = [osm_via.get(v, "") for v in vie_norm]
+    osm_fuori = _osm_fuori(comune, vie_norm)
+    p["OSM_FUORI"] = [v in osm_fuori for v in vie_norm]
     p["D_POSIZIONE"] = [""] * len(p)
     v = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
     if len(v):
@@ -521,6 +524,7 @@ def _prese_comune(comune: str) -> pd.DataFrame:
 
 
 _CACHE_OSM_UNICO: dict = {}
+_CACHE_OSM_FUORI: dict = {}
 
 
 def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
@@ -534,7 +538,19 @@ def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
             if quote and quote[0][0] != "fuori" and quote[0][1] >= 0.95:
                 esito[via] = quote[0][0]
         _CACHE_OSM_UNICO[chiave] = esito
+        # Vie il cui tracciato sta almeno al 95% fuori da ogni distretto: la
+        # fonte "via OSM" dice NO DISTRETTO (Daniele, 30/09/2026).
+        _CACHE_OSM_FUORI[chiave] = {via for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items()
+                                    if quote and quote[0][0] == "fuori" and quote[0][1] >= 0.95}
     return _CACHE_OSM_UNICO[chiave]
+
+
+def _osm_fuori(comune: str, vie_neta: list[str]) -> set[str]:
+    """Vie Neta (normalizzate) il cui tracciato OSM sta per almeno il 95% fuori da ogni distretto."""
+    _distretto_osm_unico(comune, vie_neta)
+    chiave = (comune, tuple(sorted(set(vie_neta) - {""})),
+              *(p.stat().st_mtime_ns if p.exists() else 0 for p in (vie_osm.PERCORSO_VIE_OSM, motore_calcolo.PERCORSO_CONFINI_DISTRETTI)))
+    return _CACHE_OSM_FUORI.get(chiave, set())
 
 
 def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
@@ -580,6 +596,7 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     proposte = proponi_distretti(lat, lon) if con_proposta else [("", None)] * len(p)
     # Punto calcolato fuori da ogni distretto: niente "il piu' vicino", e' un
     # punto stimato (Via Novarini 19 a Broni: il civico e' fuori rete).
+    proposte_posizione = proposte  # prima dell'eliminazione: "" = nessun distretto entro DISTANZA_MAX_PROPOSTA_M
     proposte = [("", None) if u and d is not None else (c, d) for (c, d), u in zip(proposte, usa_sis)]
     # Prima l'indirizzo (civico ANNCSU, stradario, via OSM), poi la posizione
     # (Daniele, 25/09/2026). PROPOSTA_DA = la fonte della proposta; FONTI =
@@ -607,6 +624,33 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
         concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
     p["FONTI"] = fonti
     p["CONCORDI"] = concordi
+
+    # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):
+    # un DP che Neta ha NO DISTRETTO e per cui nessuna fonte indica un distretto
+    # ha come proposta NO DISTRETTO, se le fonti dicono "fuori da ogni distretto":
+    # civico ANNCSU esistente ma fuori; via OSM per almeno il 95% fuori; posizione
+    # senza nessun distretto entro DISTANZA_MAX_PROPOSTA_M (coordinata di Neta, o di
+    # sistema alta/media, non l'approssimata). Sicura con almeno due fonti; si
+    # conferma come "mantieni attuale" (il DP e' gia' NO DISTRETTO in Neta).
+    if con_proposta:
+        for i in np.nonzero(((p["MOTIVO"] == "NODMA") & (p["PROPOSTA"] == "")).to_numpy())[0]:
+            r = p.iloc[i]
+            elenco = []
+            if r["CIVICO_FUORI"]:
+                elenco.append("civico ANNCSU")
+            posizione_ok = not np.isnan(lat[i]) and not approssimata[i] and proposte_posizione[i][0] == ""
+            if posizione_ok:
+                elenco.append("posizione")
+            if r["OSM_FUORI"]:
+                elenco.append("via OSM")
+            if not elenco:
+                continue
+            nome = " + ".join(elenco)
+            p.at[p.index[i], "PROPOSTA"] = r["DISTRETTO"]
+            p.at[p.index[i], "PROPOSTA_DA"] = "posizione fuori da ogni distretto" if nome == "posizione" else nome
+            p.at[p.index[i], "DISTANZA_M"] = None
+            p.at[p.index[i], "FONTI"] = " · ".join(f"{n} {r['DISTRETTO']} ✓" for n in elenco)
+            p.at[p.index[i], "CONCORDI"] = len(elenco) >= 2
     # Recepito: Neta ha gia' messo sulla presa il distretto confermato.
     p["RECEPITO"] = p["CONFERMATO"].notna() & (p["DISTRETTO"] == p["CONFERMATO"])
     # Validata ("mantieni attuale") e ancora con lo stesso distretto in Neta.
