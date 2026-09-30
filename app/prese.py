@@ -632,7 +632,7 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
         # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
         # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
         # resta visibile ma non e' mai CONCORDI: la decide l'utente.
-        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("fuori" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
+        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NO DISTRETTO" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
                   ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
                   ("posizione", c if d is None and not u else ""),
                   # frazione tutta NO DISTRETTO: dissente da una proposta con un distretto
