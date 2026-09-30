@@ -1905,6 +1905,25 @@ def prese_coordinate(request: Request, comune: str = ""):
     )
 
 
+@app.get("/prese/via")
+def prese_via(comune: str, indirizzo: str):
+    """Dove sta la via di un indirizzo Neta: il tracciato OSM (lat/lon) e, se
+    c'e', il punto del civico ANNCSU. Serve alla pagina Prese per confrontare
+    la coordinata di Neta con la via (Daniele, 30/09/2026). Sola lettura."""
+    via, civico = stradario.normalizza_indirizzo(indirizzo)
+    osm = vie_osm.vie_comune(comune)
+    nome = vie_osm.abbina([via], list(osm)).get(via, "") if osm and via else ""
+    civ = anncsu.civici_per_indirizzo(comune, [indirizzo]).iloc[0]
+    punto_civico = None
+    if pd.notna(civ["CIV_LAT"]) and pd.notna(civ["CIV_LON"]):
+        punto_civico = {"lat": float(civ["CIV_LAT"]), "lon": float(civ["CIV_LON"]), "civico": civico}
+    return {
+        "nome_osm": nome,
+        "tratti": [[[float(y), float(x)] for x, y in tr] for tr in osm[nome]] if nome else [],
+        "civico": punto_civico,
+    }
+
+
 @app.get("/prese/esporta")
 def prese_esporta(request: Request, comune: str = "", tutte: int = 0):
     """Excel una riga per presa. Di default solo le conferme (il file per

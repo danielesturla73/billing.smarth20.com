@@ -456,7 +456,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
         <span class="badge" style="background:${COLORE_MOTIVO[r.MOTIVO] || VERDE}1f;color:${COLORE_MOTIVO[r.MOTIVO] || VERDE}">${esc(MOTIVO_TESTO[r.MOTIVO] || (r.ORIGINE === 'manuale' || r.ORIGINE === 'zona' ? ORIGINE_TESTO[r.ORIGINE] : 'sistemata'))}</span>
         <span class="testo-tenue">attuale <span class="mono">${esc(r.DISTRETTO)}</span></span>
       </div>
-      <div>${esc(r.INDIRIZZO)}</div>
+      <div>${esc(r.INDIRIZZO)} <button type="button" class="btn-link azione-via" title="Mostra in mappa dove sta la via (e il civico), non il punto">📍 mostra la via</button></div>
       <div class="testo-tenue">${r.N_SERVIZI === 1 ? 'Servizio' : r.N_SERVIZI + ' servizi'}: <span class="mono">${esc(r.SERVIZI)}</span></div>
       <div>${testoProposta(r)}</div>
       ${conferma}${modulo}
@@ -531,6 +531,36 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     return true;
   }
 
+  // Tracciato della via (OSM) e civico ANNCSU sulla mappa, per confrontarli
+  // con la coordinata di Neta: la mappa si inquadra su via, civico e punto.
+  const stratoVia = L.layerGroup().addTo(mappa);
+  async function mostraVia(r, bottone) {
+    stratoVia.clearLayers();
+    const testo = bottone.textContent;
+    bottone.disabled = true; bottone.textContent = 'carico…';
+    try {
+      const risp = await fetch(`/prese/via?comune=${encodeURIComponent(COMUNE)}&indirizzo=${encodeURIComponent(r.INDIRIZZO)}`);
+      if (!risp.ok) throw new Error(risp.status);
+      const v = await risp.json();
+      const punti = r.COORD_VALIDE ? [[r.LAT, r.LON]] : [];
+      v.tratti.forEach(t => { L.polyline(t, { color: '#C4007A', weight: 6, opacity: 0.85 }).addTo(stratoVia); punti.push(...t); });
+      if (v.civico) {
+        L.circleMarker([v.civico.lat, v.civico.lon], { radius: 8, weight: 2, color: '#fff', fillColor: '#C4007A', fillOpacity: 1 })
+          .bindTooltip(`Civico ${esc(v.civico.civico || '')} (ANNCSU)`, { permanent: true, direction: 'top' }).addTo(stratoVia);
+        punti.push([v.civico.lat, v.civico.lon]);
+      }
+      if (!v.tratti.length && !v.civico) alert(`Via non trovata in OpenStreetMap né tra i civici ANNCSU: ${r.INDIRIZZO}`);
+      else {
+        if (!v.tratti.length) alert('Via non trovata in OpenStreetMap: mostro solo il civico ANNCSU.');
+        mappa.fitBounds(L.latLngBounds(punti), { padding: [40, 40], maxZoom: 18 });
+      }
+    } catch (err) {
+      alert('Non riesco a caricare la via: ' + err.message);
+    } finally {
+      bottone.disabled = false; bottone.textContent = testo;
+    }
+  }
+
   document.getElementById('elenco').addEventListener('click', function (e) {
     const riga = e.target.closest('.riga-presa');
     if (!riga) return;
@@ -545,6 +575,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
       invia([{ chiave: chiave, distretto: r.DISTRETTO, validata: true }]);
     } else if (e.target.classList.contains('azione-togli')) {
       invia([{ chiave: chiave, distretto: '' }]);
+    } else if (e.target.classList.contains('azione-via')) {
+      seleziona(chiave, false);
+      mostraVia(perChiave.get(chiave), e.target);
     } else if (e.target.tagName !== 'INPUT') {
       seleziona(chiave, false);
     }
