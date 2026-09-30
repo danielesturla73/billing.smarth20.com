@@ -893,6 +893,10 @@ def conferme_comune(comune: str) -> dict[str, dict]:
             for r in a.to_dict("records")}
 
 
+# NO DISTRETTO si puo' scegliere a mano come destinazione (Daniele, 30/09/2026):
+# il DP esce dai volumi del distretto in cui era. "NODMA" e' un alias.
+NO_DISTRETTO = "NO DISTRETTO"
+
 ORIGINI = {"proposta": "proposta dell'app", "manuale": "spostato a mano", "zona": "spostato con una zona",
            "mantieni": "mantieni attuale", "": ""}
 
@@ -912,6 +916,8 @@ def salva_assegnazioni(comune: str, voci: list[dict], utente: str) -> tuple[int,
         for voce in voci:
             chiave = voce["chiave"]
             distretto = (voce.get("distretto") or "").strip().upper()
+            if distretto == "NODMA":
+                distretto = NO_DISTRETTO
             validata = bool(voce.get("validata"))
             origine = "mantieni" if validata else (voce.get("origine") or "proposta")
             if origine not in ORIGINI:
@@ -922,7 +928,7 @@ def salva_assegnazioni(comune: str, voci: list[dict], utente: str) -> tuple[int,
                     "DELETE FROM prese_assegnazioni WHERE LOCALITA=? AND DP=?", (comune, chiave)
                 ).rowcount
                 continue
-            if not validata and distretto not in noti:
+            if not validata and distretto not in noti and distretto != NO_DISTRETTO:
                 raise ValueError(f"Distretto '{distretto}' non presente nell'elenco distretti né nei confini.")
             conn.execute(
                 "INSERT INTO prese_assegnazioni (LOCALITA, DP, DISTRETTO, UTENTE, QUANDO, VALIDATA, ORIGINE, NOTA) "

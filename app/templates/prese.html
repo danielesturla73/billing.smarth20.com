@@ -161,6 +161,7 @@
   </div>
 </div>
 <datalist id="lista-distretti">
+  <option value="NO DISTRETTO">fuori distretto (NODMA)</option>
   {% for d in distretti_comune %}<option value="{{ d }}">{{ nomi_distretti.get(d, '') }}</option>{% endfor %}
   {% for d in distretti_tutti if d not in distretti_comune %}<option value="{{ d }}">{{ comuni_distretti.get(d, '') }}</option>{% endfor %}
 </datalist>
@@ -191,6 +192,7 @@
   </div>
 </div>
 <datalist id="lista-distretti-mappa">
+  <option value="NO DISTRETTO">fuori distretto (NODMA)</option>
   {% for d in distretti_comune %}<option value="{{ d }}">{{ nomi_distretti.get(d, '') }}</option>{% endfor %}
   {% for d in distretti_tutti if d not in distretti_comune %}<option value="{{ d }}">{{ comuni_distretti.get(d, '') }}</option>{% endfor %}
 </datalist>
@@ -589,7 +591,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     if (!riga) return;
     const chiave = riga.dataset.chiave;
     if (e.target.classList.contains('azione-conferma')) {
-      const valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
+      let valore = riga.querySelector('input.campo-distretto').value.trim().toUpperCase();
+      if (valore === 'NODMA') valore = 'NO DISTRETTO';  // alias: NO DISTRETTO si sceglie anche a mano
       if (!valore) { alert('Scrivi o scegli un distretto.'); return; }
       const r = perChiave.get(chiave);
       // Il distretto che il DP ha gia' (per esempio NO DISTRETTO) non e' una conferma
@@ -741,7 +744,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   document.getElementById('mappa').addEventListener('click', function (e) {
     if (!e.target.classList.contains('azione-sposta')) return;
     const modulo = e.target.closest('.modulo-assegna');
-    const distretto = modulo.querySelector('.campo-distretto').value.trim().toUpperCase();
+    let distretto = modulo.querySelector('.campo-distretto').value.trim().toUpperCase();
+    if (distretto === 'NODMA') distretto = 'NO DISTRETTO';
     if (!distretto) { alert('Scrivi o scegli un distretto.'); return; }
     const p = PUNTI.find(x => x.CHIAVE === modulo.dataset.chiave);
     const contrarie = [['civico ANNCSU', p.D_CIVICO], ['stradario', p.D_STRADARIO], ['via OSM', p.D_OSM]].filter(([, d]) => d && d !== distretto);
@@ -818,7 +822,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     pannello.addEventListener('click', function (e) {
       if (e.target.id === 'zona-chiudi-pannello') pulisciZona();
       if (e.target.id !== 'zona-sposta') return;
-      const destinazione = document.getElementById('zona-distretto').value.trim().toUpperCase();
+      let destinazione = document.getElementById('zona-distretto').value.trim().toUpperCase();
+      if (destinazione === 'NODMA') destinazione = 'NO DISTRETTO';
       const nota = document.getElementById('zona-nota').value.trim();
       if (!destinazione) { alert('Scegli il distretto di destinazione.'); return; }
       if (!nota) { alert('Scrivi una nota: perché questi punti di erogazione si spostano (va anche a Neta).'); return; }
