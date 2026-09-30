@@ -687,7 +687,9 @@ def _calcola_riepilogo(comuni: list[str]) -> list[dict]:
             righe.append({"comune": comune, "NODMA": 0, "ND": 0, "ALTRO": 0, "POSIZIONE": 0, "FUSO": 0, "VIA": 0,
                           "confermate": 0, "recepite": 0, "validate": 0, "coordinate": 0})
             continue
-        aperte = p[(p["MOTIVO"] != "") & ~p["VALIDATA"]]
+        # Aperte = ancora da confermare (Daniele, 30/09/2026): le confermate
+        # non recepite da Neta hanno ancora il motivo, ma contano in "confermate".
+        aperte = p[(p["MOTIVO"] != "") & ~p["VALIDATA"] & p["CONFERMATO"].isna()]
         righe.append({
             "comune": comune,
             "NODMA": int((aperte["MOTIVO"] == "NODMA").sum()),

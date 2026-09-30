@@ -389,7 +389,9 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     '<span><i style="border:1.5px dashed #6B7F8A;background:none"></i>Altri distretti</span>';
 
   function kpi() {
-    const aperte = RIGHE.filter(r => r.MOTIVO && !r.VALIDATA);
+    // Aperte = ancora da confermare (Daniele, 30/09/2026): quelle confermate ma non
+    // ancora recepite da Neta hanno ancora il motivo, ma stanno nella scheda "Confermate".
+    const aperte = RIGHE.filter(r => r.MOTIVO && !r.VALIDATA && !r.CONFERMATO);
     const conta = m => aperte.filter(r => r.MOTIVO === m).length;
     const card = (etichetta, valore, classe) => `<div class="kpi ${classe || ''}"><div class="etichetta">${etichetta}</div><div class="valore">${fmt(valore)}</div></div>`;
     document.getElementById('kpi').innerHTML =
