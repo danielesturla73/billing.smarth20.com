@@ -423,6 +423,11 @@
     <li><strong>Corrispondenze manuali delle vie (<code>vie_alias.csv</code>)</strong>: a Cava Manara Neta e ANNCSU hanno "Via Alessandro Lamarmora", OpenStreetMap "Via Alberto Lamarmora" (il nome
       giusto, secondo Daniele). Nessuna regola generica poteva saperlo. Nuovo file <code>project_docs/vie_alias.csv</code> (comune, via di Neta, nome in OSM o ANNCSU), mantenuto a mano, letto
       dall'app: al momento una sola riga. Vale solo se il nome di riferimento esiste nel comune. La tabella completa resta rinviata: si aggiunge una riga quando una via pesante blocca il lavoro.</li>
+    <li><strong>Nome OSM più corto di quello di Neta ("Via Cavour" per "VIA CAMILLO BENSO CAVOUR")</strong>: a Certosa di Pavia la via non si abbinava a OSM perché mancavano due parole. Ora ne possono mancare due, ma solo se le
+      parole OSM sono <em>identiche</em> a quelle di Neta (nessuna tolleranza sui refusi), il tipo di via è lo stesso, c'è una parola di almeno 6 lettere e la parola coincide nella parte del
+      nome <em>prima</em> della frazione. Le prime prove, senza queste cautele, davano abbinamenti sbagliati (CARLO~CARSO, CASCIA~COSCIA, CORTI~CONTI, "VIA DEL CAMPO FRAZ.CAVAGNERA" su
+      "Via Cavagnera") e sono state scartate. 16 abbinamenti nuovi su OSM e 14 su ANNCSU (Certosa Via Cavour 65 DP, Casteggio Piazza Cavour 50, Sannazzaro Via Cavour 38, Giussago, Vidigulfo,
+      Cava Manara), nessuno perso o cambiato.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la

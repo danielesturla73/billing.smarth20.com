@@ -203,16 +203,36 @@ def _compatta(nome: str) -> tuple[str, str]:
     return famiglia, "".join(ABBREVIAZIONI.get(t, t) for t in gr)
 
 
+_RE_LOCALITA = re.compile(r"\s*-\s*|\s*\bFR(?:AZ)?\b\.?\s*")
+
+
+def _prima_della_localita(via: str) -> frozenset[str]:
+    """Le parole del nome Neta prima della localita' ("VIA DEL CAMPO FRAZ.CAVAGNERA" -> del campo): una parola
+    che coincide con il nome della frazione non e' il nome della via."""
+    base = _RE_LOCALITA.split(via.upper(), maxsplit=1)[0]
+    return parole(base)[1] or parole(via)[1]
+
+
 def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]]) -> tuple[str, list[str]]:
     """Cerca il nome OSM (o ANNCSU) di una via Neta tra osm = [(nome, tipo, parole)].
     Restituisce ("ok", [nome]), ("ambigua", [nomi a pari merito]) o ("nessuna", [])."""
     tipo, pv = parole(via)
     if not pv:
         return "nessuna", []
+    pv_base = _prima_della_localita(via)
     candidati = []
     for nome, t_osm, po in osm:
         po_nome = po - {"PRIVATA"}  # il nome OSM contenuto in quello Neta (Strada Privata M. Sironi = VIA MARIO SIRONI)
-        if _contenute(pv, po) or (po_nome and _contenute(po_nome, pv) and len(pv) - len(po_nome) <= 1):
+        # Nome OSM piu' corto di quello Neta: manca al massimo una parola. Ne possono mancare due solo se
+        # le parole OSM sono IDENTICHE a quelle di Neta (niente tolleranza sui refusi), il tipo di via e' lo
+        # stesso e una parola ha almeno 6 lettere: "Via Cavour" per "VIA CAMILLO BENSO CAVOUR" (Daniele,
+        # 30/09/2026, Certosa di Pavia). Provato senza queste cautele: CARLO~CARSO, CASCIA~COSCIA, CORTI~CONTI,
+        # Piazza Vittorio Emanuele II ~ Via di Vittorio facevano abbinamenti sbagliati.
+        mancanti = len(pv) - len(po_nome)
+        corto = bool(po_nome) and (
+            (mancanti <= 1 and _contenute(po_nome, pv))
+            or (mancanti == 2 and t_osm == tipo and all(w in pv_base for w in po_nome) and max(len(w) for w in po_nome) >= 6))
+        if _contenute(pv, po) or corto:
             extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
             if "PRIVATA" in po and "PRIVATA" not in pv:
                 extra += 2  # via privata solo se non c'e' quella pubblica
