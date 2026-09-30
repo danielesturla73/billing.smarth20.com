@@ -36,6 +36,15 @@ NUMERI = {"1": "PRIMO", "I": "PRIMO", "2": "DUE", "II": "DUE", "4": "QUATTRO", "
           "11": "UNDICI", "20": "VENTI", "XX": "VENTI", "24": "VENTIQUATTRO", "XXIV": "VENTIQUATTRO",
           "25": "VENTICINQUE", "XXV": "VENTICINQUE", "26": "VENTISEI", "XXVI": "VENTISEI", "3": "TRE", "III": "TRE",
           "5": "CINQUE", "V": "CINQUE", "10": "DIECI", "X": "DIECI", "12": "DODICI", "XII": "DODICI"}
+# Numeri romani dei nomi (Giovanni XXIII, Pio XII, Vittorio Emanuele II): in OpenStreetMap
+# spesso sono scritti in lettere ("Papa Giovanni Ventitreesimo"), in Neta e ANNCSU in cifre
+# romane. Tutti e due diventano la stessa parola (Daniele, 30/09/2026, Casorate Primo).
+# Solo i numeri di almeno due lettere: I, V, X da soli sono iniziali.
+ORDINALI = {"II": "SECONDO", "III": "TERZO", "IV": "QUARTO", "VI": "SESTO", "VII": "SETTIMO", "VIII": "OTTAVO",
+            "IX": "NONO", "XI": "UNDICESIMO", "XII": "DODICESIMO", "XIII": "TREDICESIMO", "XIV": "QUATTORDICESIMO",
+            "XV": "QUINDICESIMO", "XVI": "SEDICESIMO", "XVII": "DICIASSETTESIMO", "XVIII": "DICIOTTESIMO",
+            "XIX": "DICIANNOVESIMO", "XX": "VENTESIMO", "XXI": "VENTUNESIMO", "XXII": "VENTIDUESIMO",
+            "XXIII": "VENTITREESIMO"}
 # Non sono vie: una cascina o una frazione non ha un tracciato con cui
 # confrontare la presa (CASCINA DOSSELLO non e' Via Dossello).
 NON_VIE = {"CASCINA", "CASCINE", "FRAZIONE", "FRAZ", "CASE", "PODERE", "FONDO", "CA"}
@@ -68,6 +77,8 @@ def parole(nome: str) -> tuple[str, frozenset[str]]:
             out.append(NUMERI[p])
             continue
         p = ABBREVIAZIONI.get(p, p)
+        if k > 0 and p in ORDINALI:
+            p = ORDINALI[p]
         if p in PAROLE_VUOTE or p in TIPI:
             continue
         if len(p) == 1 and p.isalpha():
@@ -159,13 +170,16 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
                 # (GALILEI ~ GALILEO) faceva pareggiare Via Galileo Galilei e Via Galileo
                 # Ferraris (Daniele, 30/09/2026, Broni).
                 esatte = sum(a in po for a in pv)
-                candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, nome))
+                # A ulteriore parita' (stessa via scritta in due modi, "Paolo VI" e "Paolo Sesto")
+                # vince il nome scritto come quello di Neta.
+                identico = 0 if nome.upper().strip() == via.upper().strip() else 1
+                candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, identico, nome))
         if not candidati:
             continue
         candidati.sort()
-        if len(candidati) > 1 and candidati[0][:3] == candidati[1][:3]:
+        if len(candidati) > 1 and candidati[0][:4] == candidati[1][:4]:
             continue
-        esito[via] = candidati[0][3]
+        esito[via] = candidati[0][4]
     return esito
 
 
