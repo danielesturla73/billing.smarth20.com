@@ -626,22 +626,27 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     # "punto calcolato" e non conta in FONTI ne' in CONCORDI.
     p["PROPOSTA_DA"] = [f or (("punto calcolato" if u else "posizione") if c else "")
                         for f, (c, _), u in zip(p["FONTE_INDIRIZZO"], proposte, usa_sis)]
-    fonti, concordi = [], []
+    fonti, concordi, civico_contro = [], [], []
     for r, (c, d), u in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI", "FRAZIONE_ND"]].to_dict("records"), proposte, usa_sis):
         # Civico ANNCSU esistente ma fuori da ogni distretto: fonte che dissente
         # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
         # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
         # resta visibile ma non e' mai CONCORDI: la decide l'utente.
-        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NO DISTRETTO" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
+        # Si legge "civico ANNCSU NODMA ✓" (Daniele, 30/09/2026): il civico ha il suo valore,
+        # NODMA, e il ✓ dice che la fonte c'e'. Che la proposta sia un distretto e non
+        # NODMA lo dice CIVICO_NODMA_CONTRO (l'etichetta "da decidere"), non il segno.
+        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NODMA" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
                   ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
                   ("posizione", c if d is None and not u else ""),
                   # frazione tutta NO DISTRETTO: dissente da una proposta con un distretto
                   ("resto della frazione", "NO DISTRETTO" if r["FRAZIONE_ND"] and r["PROPOSTA"] else "")]
         elenco = [(n, x) for n, x in elenco if x]
-        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] else '✗'}" for n, x in elenco))
+        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] or (n == 'civico ANNCSU' and x == 'NODMA') else '✗'}" for n, x in elenco))
+        civico_contro.append(bool(r["CIVICO_FUORI"] and r["PROPOSTA"] and not r["D_CIVICO"]))
         concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
     p["FONTI"] = fonti
     p["CONCORDI"] = concordi
+    p["CIVICO_NODMA_CONTRO"] = civico_contro
 
     # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):
     # un DP che Neta ha NO DISTRETTO e per cui nessuna fonte indica un distretto
@@ -669,7 +674,7 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
             p.at[p.index[i], "PROPOSTA"] = r["DISTRETTO"]
             p.at[p.index[i], "PROPOSTA_DA"] = "posizione fuori da ogni distretto" if nome == "posizione" else nome
             p.at[p.index[i], "DISTANZA_M"] = None
-            p.at[p.index[i], "FONTI"] = " · ".join(f"{n} {r['DISTRETTO']} ✓" for n in elenco)
+            p.at[p.index[i], "FONTI"] = " · ".join(f"{n} NODMA ✓" for n in elenco)
             p.at[p.index[i], "CONCORDI"] = len(elenco) >= 2
     # Recepito: Neta ha gia' messo sulla presa il distretto confermato.
     p["RECEPITO"] = p["CONFERMATO"].notna() & (p["DISTRETTO"] == p["CONFERMATO"])
