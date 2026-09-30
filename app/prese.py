@@ -435,6 +435,27 @@ def _prese_comune(comune: str) -> pd.DataFrame:
             fuori_c = np.array([_nome_comune(d.split(" (")[0]) != _nome_comune(comune) for d in dove_c]) & (dist_c > TOLLERANZA_CONFINE_COMUNE_M)
             if fuori_c.any():
                 civ.loc[np.nonzero(con_pos)[0][fuori_c], ["CIV_LAT", "CIV_LON"]] = np.nan
+    # Civico ANNCSU isolato dai suoi vicini per numero (Daniele, 30/09/2026, Giussago Via Fratelli Cairoli 43: il civico
+    # sta a 3,8 km dal resto della via, dove sono i DP, e prevaleva su Neta, posizione, stradario e OSM concordi). Si
+    # scarta solo con il doppio riscontro: il civico sta oltre la soglia dai vicini E il DP (coordinata di Neta) sta con i
+    # vicini e a piu' di 500 m dal civico. Se e' il DP a confermare il civico, il civico resta (131 casi su 292 isolati).
+    # 97 DP in tutto.
+    vic = anncsu.vicini_civici(comune)
+    if vic:
+        lat_c = civ["CIV_LAT"].to_numpy(dtype=float)
+        lon_c = civ["CIV_LON"].to_numpy(dtype=float)
+        numeri = [stradario.normalizza_indirizzo(i)[1] for i in p["INDIRIZZO"]]
+        coord_ok = p["COORD_VALIDE"].to_numpy()
+        lat_d, lon_d = p["LAT"].to_numpy(dtype=float), p["LON"].to_numpy(dtype=float)
+        for i, (odonimo, n) in enumerate(zip(civ["VIA_ANNCSU"], numeri)):
+            k = (odonimo, n)
+            if n is None or k not in vic or np.isnan(lat_c[i]) or not coord_ok[i]:
+                continue
+            cla, clo, soglia = vic[k]
+            if anncsu._metri(lat_c[i], lon_c[i], cla, clo) <= soglia:
+                continue
+            if anncsu._metri(lat_d[i], lon_d[i], cla, clo) <= soglia and anncsu._metri(lat_d[i], lon_d[i], lat_c[i], lon_c[i]) > SOGLIA_CIVICO_ISOLATO_M:
+                civ.loc[i, ["CIV_LAT", "CIV_LON"]] = np.nan
     p["CIV_LAT"] = civ["CIV_LAT"].to_numpy()
     p["CIV_LON"] = civ["CIV_LON"].to_numpy()
     p["CIVICO_ESISTE"] = civ["CIVICO_ESISTE"].to_numpy()
@@ -587,6 +608,9 @@ SOGLIA_OSM_FUORI = 0.95
 _RE_FRAZIONE = re.compile(r"^(FRAZIONE|FRAZ|LOCALIT\w*|LOC|CASCIN\w*|C\.\s?NA|C\.\s?NE|CNA)\b")
 
 MIN_DP_FRAZIONE = 2
+
+# Un civico ANNCSU isolato dai vicini si scarta solo se il DP sta a piu' di tanti metri da lui (vedi _prese_comune).
+SOGLIA_CIVICO_ISOLATO_M = 500
 
 _RE_FRAZ_PREFISSO = re.compile(r"^(?:FRAZ(?:IONE)?\.?|FR\.?)\s*([^-]+?)\s*-\s*(.+)$")
 _RE_FRAZ_SUFFISSO = re.compile(r"^(.+?)\s*(?:-\s*)?(?:FRAZ(?:IONE)?\.?|FR\.)\s*(.+)$")

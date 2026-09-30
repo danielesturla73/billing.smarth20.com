@@ -64,6 +64,48 @@ def _posizioni_civici(con: pd.DataFrame) -> pd.DataFrame:
     return pos[["LAT", "LON", "METODO"]]
 
 
+_CACHE_VICINI: dict = {}
+FINESTRA_VICINI = 10        # civici con numero entro +-10 dallo stesso odonimo
+MIN_VICINI = 4
+SOGLIA_MINIMA_ISOLATO_M = 500
+
+
+def _metri(la1, lo1, la2, lo2):
+    return np.hypot((np.asarray(la1) - la2) * 110_540, (np.asarray(lo1) - lo2) * 111_320 * np.cos(np.radians(45.2)))
+
+
+def vicini_civici(comune: str) -> dict[tuple[str, int], tuple[float, float, float]]:
+    """{(odonimo, civico): (lat, lon, soglia_m)}: la posizione mediana dei civici con numero vicino (+-FINESTRA_VICINI) della
+    stessa via, e di quanto un civico puo' stare lontano da essa (max(SOGLIA_MINIMA_ISOLATO_M, 4 volte la dispersione dei
+    vicini)). Solo per i civici con almeno MIN_VICINI vicini. Serve a riconoscere un civico ANNCSU isolato, posizionato a
+    chilometri dal resto della sua via (Giussago Via Fratelli Cairoli 43, a 3,8 km). Da solo non basta a scartarlo: vedi
+    prese._prese_comune, dove serve anche che il DP stia con i vicini."""
+    st = PERCORSO_ANNCSU.stat() if PERCORSO_ANNCSU.exists() else None
+    chiave = (comune.strip().upper(), st.st_mtime_ns if st else 0)
+    if chiave in _CACHE_VICINI:
+        return _CACHE_VICINI[chiave]
+    d = _dati()
+    d = d[(d["COMUNE"] == comune.strip().upper()) & d["LAT"].notna() & d["CIVICO"].notna()]
+    esito: dict[tuple[str, int], tuple[float, float, float]] = {}
+    if not d.empty:
+        pos = _posizioni_civici(d.assign(CIVICO=d["CIVICO"].astype(int))).dropna(subset=["LAT"])
+        for odonimo, g in pos.groupby(level=0):
+            if len(g) < MIN_VICINI + 1:
+                continue
+            civ = g.index.get_level_values(1).to_numpy()
+            la, lo = g["LAT"].to_numpy(), g["LON"].to_numpy()
+            for i in range(len(g)):
+                v = np.nonzero((np.abs(civ - civ[i]) <= FINESTRA_VICINI) & (np.arange(len(g)) != i))[0]
+                if len(v) < MIN_VICINI:
+                    continue
+                cla, clo = float(np.median(la[v])), float(np.median(lo[v]))
+                dispersione = float(np.median(_metri(la[v], lo[v], cla, clo)))
+                esito[(odonimo, int(civ[i]))] = (cla, clo, max(float(SOGLIA_MINIMA_ISOLATO_M), 4 * dispersione))
+    _CACHE_VICINI.clear()
+    _CACHE_VICINI[chiave] = esito
+    return esito
+
+
 def civici_per_indirizzo(comune: str, indirizzi) -> pd.DataFrame:
     """Per ogni indirizzo Neta: VIA_ANNCSU (odonimo abbinato, '' se la via
     non c'e'), CIVICO_ESISTE (True/False, None se via o civico mancano),

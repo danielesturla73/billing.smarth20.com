@@ -463,6 +463,11 @@
       mentre i civici 1, 2, 4 e 5 della stessa via stanno dove sono i DP (12 DP su 13 entro 150 m, mediana 19 m): un errore di posizionamento in ANNCSU, che per gerarchia prevaleva su Neta, posizione, stradario e OSM concordi
       (DGSG05) e proponeva DCPV02, il distretto di un altro comune. Ora un civico posizionato fuori dal comune dell'indirizzo (oltre 100 m dal confine) non si usa. Tocca 35 DP in tutti i comuni, 19 con un motivo aperto
       (Casteggio 20, Broni 6, Siziano 5, Giussago 3, Voghera 1).</li>
+    <li><strong>Confini dei comuni di nuovo spenti di default nelle mappe</strong> (erano stati accesi il 30/09 e poi tolti): si accendono dal menu dei livelli in alto a destra.</li>
+    <li><strong>Civico ANNCSU isolato dai suoi vicini: si scarta con il doppio riscontro</strong>: a Giussago "Via F.lli Cairoli 43" (DP 301807250000921) era segnalata perché in ANNCSU i civici 37A, 39A, 40 (A-I) e 43 stanno tutti nello stesso
+      punto, a 3,8 km dal resto della via dove sono i DP (il civico 18 A/B/C a 12 km): posizioni segnaposto o sbagliate, che per gerarchia prevalevano su Neta, posizione, stradario e OSM concordi. Regola: un civico a più di
+      max(500 m, 4 volte la dispersione) dalla posizione mediana dei civici con numero vicino (±10) della stessa via <em>e</em> con il DP (coordinata di Neta) che sta con i vicini e a più di 500 m dal civico non si usa. Il secondo riscontro
+      serve perché la sola regola scartava anche civici giusti: su 292 DP con un civico isolato, 131 hanno il punto di Neta a meno di 150 m dal civico. Toccati 97 DP (Casteggio 22, Gambolò 23, Voghera 22, Rivanazzano 11, Garlasco 7, Giussago 5, Broni 4, Stradella 2, Robbio 1).</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
