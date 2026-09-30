@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from app import stradario, vie_osm
@@ -41,6 +42,28 @@ def ha_coordinate(comune: str) -> bool:
     return len(d) > 0 and d["LAT"].notna().mean() >= 0.5
 
 
+# Un civico con piu' posizioni che distano piu' di questo e' ambiguo (in ANNCSU una via con lo stesso nome puo'
+# stare in piu' frazioni: "Via Colombara 1" e "Via Colombara 1/A" a Gambolo' stanno a 6 km): non si usa.
+SOGLIA_CIVICO_AMBIGUO_M = 150
+
+
+def _posizioni_civici(con: pd.DataFrame) -> pd.DataFrame:
+    """Una riga per (ODONIMO, CIVICO) con LAT, LON, METODO. Se esiste la riga senza esponente si usa solo quella
+    (l'"1", non l'"1/A": Neta non scrive l'esponente); altrimenti tutte. Se le posizioni scelte distano piu' di
+    SOGLIA_CIVICO_AMBIGUO_M la posizione e' NaN, non la loro mediana (Daniele, 30/09/2026, Gambolo' Via
+    Colombara 1: la mediana finiva a 2,4 km dalla casa, in mezzo al nulla)."""
+    con = con.copy()
+    base = con["ESPONENTE"].fillna("").astype(str).str.strip() == ""
+    ha_base = base.groupby([con["ODONIMO"], con["CIVICO"]]).transform("any")
+    con = con[~ha_base | base]
+    pos = con.groupby(["ODONIMO", "CIVICO"]).agg(
+        LAT=("LAT", "median"), LON=("LON", "median"), METODO=("METODO", "max"),
+        DLAT=("LAT", lambda x: x.max() - x.min()), DLON=("LON", lambda x: x.max() - x.min()))
+    dist = np.hypot(pos["DLAT"] * 110_540, pos["DLON"] * 111_320 * np.cos(np.radians(pos["LAT"])))
+    pos.loc[dist > SOGLIA_CIVICO_AMBIGUO_M, ["LAT", "LON"]] = np.nan
+    return pos[["LAT", "LON", "METODO"]]
+
+
 def civici_per_indirizzo(comune: str, indirizzi) -> pd.DataFrame:
     """Per ogni indirizzo Neta: VIA_ANNCSU (odonimo abbinato, '' se la via
     non c'e'), CIVICO_ESISTE (True/False, None se via o civico mancano),
@@ -57,7 +80,7 @@ def civici_per_indirizzo(comune: str, indirizzi) -> pd.DataFrame:
     abbinate = vie_osm.abbina(sorted({v for v, _ in nv} - {""}), sorted(set(d["ODONIMO"])))
     civici = set(zip(d["ODONIMO"], d["CIVICO"].dropna().astype(int)))
     con = d.dropna(subset=["CIVICO", "LAT"]).assign(CIVICO=lambda x: x["CIVICO"].astype(int))
-    pos = con.groupby(["ODONIMO", "CIVICO"]).agg(LAT=("LAT", "median"), LON=("LON", "median"), METODO=("METODO", "max"))
+    pos = _posizioni_civici(con)
     posizioni = dict(zip(pos.index, zip(pos["LAT"], pos["LON"], pos["METODO"])))
     via_a, esiste, lat, lon, metodo = [], [], [], [], []
     for via, civico in nv:
@@ -92,4 +115,5 @@ def civici_con_coordinate(comune: str) -> pd.DataFrame:
     CIVICO, LAT, LON — per costruire lo stradario dai civici veri."""
     d = _dati()
     d = d[(d["COMUNE"] == comune.strip().upper()) & d["LAT"].notna() & d["CIVICO"].notna()]
-    return d.assign(CIVICO=d["CIVICO"].astype(int)).groupby(["ODONIMO", "CIVICO"], as_index=False)[["LAT", "LON"]].median()
+    pos = _posizioni_civici(d.assign(CIVICO=d["CIVICO"].astype(int))).dropna(subset=["LAT"]).reset_index()
+    return pos[["ODONIMO", "CIVICO", "LAT", "LON"]]

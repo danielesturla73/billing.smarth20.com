@@ -442,6 +442,11 @@
       nella legenda: senza anello (coordinata di Neta), anello verde scuro (calcolata dall'app), vuoto e tratteggiato (a metà via).</li>
     <li><strong>Stesso nome di strada in più frazioni</strong>: a Gambolò "VIA GAMBOLO'" (102 DP) e "FRAZ. CASON PERI-VIA GAMBOLO'" (6), "VIA AGRICOLTURA" e "… - FRAZ. STRADELLA", "VIA MULINO" e "… - FRAZ. STRADELLA": strade diverse con lo stesso
       nome, che in OSM e ANNCSU si mescolano. I DP di queste strade (45 aperti, tutti a Gambolò) non sono più "sicuri": etichetta rossa "da decidere · stesso nome in più frazioni", con la proposta come indizio.</li>
+    <li><strong>Civici ANNCSU: l'esponente non si ignora e i civici ambigui non si usano</strong>: a Gambolò "Via Colombara 1" (DP 301806850004230) aveva la coordinata di Neta giusta, ma l'app la riteneva sbagliata e la sostituiva con un
+      civico ANNCSU a 2,4 km. In ANNCSU ci sono "Via Colombara 1" (a 6 m da Neta) e "Via Colombara 1/A" (a 6 km, in un'altra frazione), e l'app faceva la mediana delle due posizioni, un punto in mezzo al nulla. Ora per ogni via e
+      civico si usa la riga senza esponente (l'"1", non l'"1/A"; Neta non scrive l'esponente); se anche così le posizioni distano più di 150 m il civico è ambiguo e non si usa. Su tutti i comuni, sui 38.761 DP con civico
+      posizionato: 1.000 cambiano posizione di più di 30 m (Gambolò 358, Casteggio 191, Stradella 80, Voghera 72, Siziano 66, Belgioioso 61) e 116 diventano ambigui (Gambolò 89, Voghera 24, Casteggio 3). Cambiano di conseguenza
+      il distretto del civico, i problemi di coordinata e le coordinate calcolate, che si ricalcolano da sole. Lo stradario salvato non è stato rigenerato.</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
