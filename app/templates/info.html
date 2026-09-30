@@ -393,6 +393,12 @@
   <p>Poi ci sono i controlli incrociati: comune giusto (ISTAT), entro 60 m dalla via OSM, distretto uguale a quello
     dello stradario o della via OSM. Ogni controllo non superato abbassa di un livello. Con affidabilità bassa non si
     propone niente: "da rilevare sul posto".</p>
+  <p><strong>Fuori confine per il GIS.</strong> Un terzo file, <strong>non per Neta ma per chi gestisce il GIS</strong>, dalla pagina
+    Punti di erogazione (link "Fuori confine per il GIS", Excel o GeoJSON per QGIS). Contiene i DP <em>già confermati</em> in un
+    distretto (spostati a mano, dalla proposta, con una zona o "mantieni attuale") che stanno <em>fuori dal confine</em> di quel
+    distretto: se il distretto è giusto, il problema è il confine. Nessuna soglia sulla distanza: si ordina dal più lontano. I DP
+    NO DISTRETTO (NODMA) non ci sono: essere fuori confine è corretto. La posizione usata è il civico ANNCSU (se manca, la
+    coordinata di Neta). Fogli: riepilogo per distretto, elenco dei DP, legenda.</p>
   <p><strong>Registra invio</strong> scarica il file con i soli punti di erogazione ancora aperti e lo segna nel registro: data, chi,
     quali DP. Il registro dice quanti DP Neta ha risolto e quante restano da sollecitare; nel file, "Già inviata"
     dice quante volte un DP era già stato mandato. Gli Excel "solo per guardare" non registrano niente.</p>

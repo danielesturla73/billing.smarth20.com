@@ -45,6 +45,7 @@ from fastapi.templating import Jinja2Templates
 import pandas as pd
 
 from app import accessi, anncsu, auth, cache_disco, consolidamento, database, invio_wms, motore_calcolo, prese, prese_confronto, stradario, vie_osm
+from app import prese_gis as prese_gis_modulo
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -1902,6 +1903,34 @@ def prese_coordinate(request: Request, comune: str = ""):
     return Response(
         content=contenuto,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get("/prese/gis")
+def prese_gis(request: Request, comune: str = ""):
+    """Excel per il GIS (non per Neta): DP gia' confermati in un distretto ma fuori dal suo confine,
+    probabili confini da rivedere. Senza comune: tutti."""
+    comuni = [comune.strip().upper()] if comune else _comuni_disponibili()
+    contenuto = prese_gis_modulo.esporta_gis_excel(comuni)
+    nome = f"prese_fuori_confine_per_GIS_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.xlsx"
+    auth.registra(request.state.utente["username"], "prese_gis", comune or "tutti i comuni", accessi.ip_client(request))
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get("/prese/gis.geojson")
+def prese_gis_geojson(request: Request, comune: str = ""):
+    """Gli stessi punti in GeoJSON, da aprire in QGIS insieme ai poligoni dei distretti."""
+    comuni = [comune.strip().upper()] if comune else _comuni_disponibili()
+    contenuto = prese_gis_modulo.geojson_gis(comuni)
+    nome = f"prese_fuori_confine_per_GIS_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.geojson"
+    auth.registra(request.state.utente["username"], "prese_gis_geojson", comune or "tutti i comuni", accessi.ip_client(request))
+    return Response(
+        content=contenuto, media_type="application/geo+json",
         headers={"Content-Disposition": f'attachment; filename="{nome}"'},
     )
 
