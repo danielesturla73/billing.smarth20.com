@@ -422,8 +422,15 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     cv = np.nonzero(~(np.isnan(p["CIV_LAT"].to_numpy(dtype=float)) | np.isnan(p["CIV_LON"].to_numpy(dtype=float))))[0]
     p["CIVICO_FUORI"] = False
     if len(cv):
-        fuori = np.array(_dentro_confini(p["CIV_LAT"].to_numpy(dtype=float)[cv], p["CIV_LON"].to_numpy(dtype=float)[cv])) == ""
-        p.iloc[cv[fuori], p.columns.get_loc("CIVICO_FUORI")] = True
+        clat = p["CIV_LAT"].to_numpy(dtype=float)[cv]
+        clon = p["CIV_LON"].to_numpy(dtype=float)[cv]
+        fuori = np.array(_dentro_confini(clat, clon)) == ""
+        # A meno di TOLLERANZA_BORDO_M dal bordo di un distretto il civico non decide
+        # (il confine disegnato puo' essere spostato di qualche metro).
+        vicino = proponi_distretti(clat[fuori], clon[fuori])
+        lontano = np.array([not (cod and dist is not None and dist <= TOLLERANZA_BORDO_M) for cod, dist in vicino], dtype=bool)
+        idx = cv[fuori][lontano] if fuori.any() else cv[fuori]
+        p.iloc[idx, p.columns.get_loc("CIVICO_FUORI")] = True
     vie_norm = [stradario.normalizza_indirizzo(i)[0] for i in p["INDIRIZZO"]]
     osm_via = _distretto_osm_unico(comune, vie_norm)
     p["D_OSM"] = [osm_via.get(v, "") for v in vie_norm]
@@ -630,30 +637,45 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     # "punto calcolato" e non conta in FONTI ne' in CONCORDI.
     p["PROPOSTA_DA"] = [f or (("punto calcolato" if u else "posizione") if c else "")
                         for f, (c, _), u in zip(p["FONTE_INDIRIZZO"], proposte, usa_sis)]
+    # Gerarchia delle fonti (Daniele, 30/09/2026): il civico ANNCSU e' la piu' autorevole.
+    # Se il civico esiste ed e' fuori da ogni distretto (oltre TOLLERANZA_BORDO_M dal
+    # bordo) il suo verdetto e' NO DISTRETTO e non lo scavalca lo stradario (Via
+    # Vallescuropasso a Broni: lo stradario dava tutta la via a DBRN02, ma le case in
+    # fondo sono fuori rete). NODMA in Neta: la conferma e' "mantieni attuale".
+    if con_proposta:
+        for i in np.nonzero(((p["MOTIVO"] != "") & p["CIVICO_FUORI"] & (p["D_CIVICO"] == "")).to_numpy())[0]:
+            r = p.iloc[i]
+            p.at[p.index[i], "PROPOSTA"] = r["DISTRETTO"] if r["MOTIVO"] == "NODMA" else NO_DISTRETTO
+            p.at[p.index[i], "PROPOSTA_DA"] = "civico ANNCSU"
+            p.at[p.index[i], "DISTANZA_M"] = None
     fonti, concordi, civico_contro = [], [], []
-    for r, (c, d), u in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI", "FRAZIONE_ND"]].to_dict("records"), proposte, usa_sis):
-        # Civico ANNCSU esistente ma fuori da ogni distretto: fonte che dissente
-        # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
-        # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
-        # resta visibile ma non e' mai CONCORDI: la decide l'utente.
-        # Si legge "civico ANNCSU NODMA ✓" (Daniele, 30/09/2026): il civico ha il suo valore,
-        # NODMA, e il ✓ dice che la fonte c'e'. Che la proposta sia un distretto e non
-        # NODMA lo dice NODMA_CONTRO_DA (l'etichetta "da decidere"), non il segno.
-        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NODMA" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
-                  ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
-                  ("posizione", c if d is None and not u else ""),
-                  # frazione tutta NO DISTRETTO: dissente da una proposta con un distretto
-                  ("resto della frazione", "NODMA" if r["FRAZIONE_ND"] and r["PROPOSTA"] else "")]
+    colonne_fonti = ["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI", "OSM_FUORI", "FRAZIONE_ND"]
+    for k, (r, (c, d), u) in enumerate(zip(p[colonne_fonti].to_dict("records"), proposte, usa_sis)):
+        pr = r["PROPOSTA"]
+        pr_nodma = str(pr).upper().startswith("NO")  # la proposta e' NO DISTRETTO / NODMA
+        # Posizione "fuori da ogni distretto": coordinata di Neta valida, nessun distretto entro
+        # DISTANZA_MAX_PROPOSTA_M, non approssimata.
+        pos_fuori = bool(pr) and not np.isnan(lat[k]) and not approssimata[k] and proposte_posizione[k][0] == ""
+        civico_nodma = bool(r["CIVICO_FUORI"] and not r["D_CIVICO"] and pr)
+        # Si legge "civico ANNCSU NODMA ✓" (Daniele, 30/09/2026): la fonte c'e' e ha il suo
+        # valore, NODMA; il ✓ non dice "concorda con la proposta". Se la proposta e' un
+        # distretto lo dice l'etichetta "da decidere" (NODMA_CONTRO_DA).
+        elenco = [("civico ANNCSU", r["D_CIVICO"] or ("NODMA" if civico_nodma else "")),
+                  ("stradario", r["D_STRADARIO"]),
+                  # Via OSM e posizione "fuori da ogni distretto" si mostrano solo se sostengono una
+                  # proposta NO DISTRETTO: contro una proposta con un distretto sono le fonti piu'
+                  # deboli e non tolgono la sicurezza a stradario e OSM d'accordo.
+                  ("via OSM", r["D_OSM"] or ("NODMA" if r["OSM_FUORI"] and pr_nodma else "")),
+                  ("posizione", c if c and d is None and not u else ("NODMA" if pos_fuori and pr_nodma else "")),
+                  ("resto della frazione", "NODMA" if r["FRAZIONE_ND"] and pr else "")]
         elenco = [(n, x) for n, x in elenco if x]
-        # Una fonte che dice NODMA si legge sempre col ✓ (c'e' e dice NODMA): che la
-        # proposta sia un distretto lo dice l'etichetta "da decidere" (NODMA_CONTRO_DA).
-        fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] or x == 'NODMA' else '✗'}" for n, x in elenco))
-        contro = [nome for nome, cond in (("il civico", r["CIVICO_FUORI"] and not r["D_CIVICO"]), ("la frazione", r["FRAZIONE_ND"])) if cond and r["PROPOSTA"]]
+        fonti.append(" · ".join(f"{n} {x} {'✓' if x == pr or x == 'NODMA' else '✗'}" for n, x in elenco))
+        contro = [nome for nome, cond in (("il civico", civico_nodma), ("la frazione", r["FRAZIONE_ND"])) if cond and pr and not pr_nodma]
         civico_contro.append(" e ".join(contro))
-        concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
+        concordi.append(bool(pr) and len(elenco) >= 2 and all(x == pr or (x == "NODMA" and pr_nodma) for _, x in elenco))
     p["FONTI"] = fonti
     p["CONCORDI"] = concordi
-    p["NODMA_CONTRO_DA"] = civico_contro  # "il civico", "la frazione", "il civico e la frazione" o ""
+    p["NODMA_CONTRO_DA"] = civico_contro  # fonti che dicono NODMA contro una proposta con un distretto ("il civico e la posizione"...) o ""
 
     # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):
     # un DP che Neta ha NO DISTRETTO e per cui nessuna fonte indica un distretto

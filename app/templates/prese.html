@@ -427,7 +427,7 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     // "da decidere" (Daniele, 30/09/2026): non si sa in che distretto metterla,
     // non e' una questione di conteggio delle fonti.
     // Una fonte (civico ANNCSU, resto della frazione) dice NODMA (✓ nelle Fonti: la fonte c'e') ma la proposta e' un distretto.
-    if (r.NODMA_CONTRO_DA) return { classe: 'discordi', badge: 'discordi', testo: `da decidere · ${r.NODMA_CONTRO_DA} dice NODMA`, perche: `${r.NODMA_CONTRO_DA[0].toUpperCase() + r.NODMA_CONTRO_DA.slice(1)} dice NODMA (fuori da ogni distretto) e la proposta è un distretto: non è confermabile in blocco.` };
+    if (r.NODMA_CONTRO_DA) return { classe: 'discordi', badge: 'discordi', testo: `da decidere · ${r.NODMA_CONTRO_DA} ${r.NODMA_CONTRO_DA.includes(' e ') ? 'dicono' : 'dice'} NODMA`, perche: `${r.NODMA_CONTRO_DA[0].toUpperCase() + r.NODMA_CONTRO_DA.slice(1)} dice NODMA (fuori da ogni distretto) e la proposta è un distretto: non è confermabile in blocco.` };
     if (!r.PROPOSTA) return { classe: 'discordi', badge: 'discordi', testo: 'da decidere · nessuna proposta', perche: 'Nessuna fonte propone un distretto: da assegnare a mano.' };
     if (no && ok > no) return { classe: 'maggioranza', badge: 'stimato', testo: `${ok} su ${tot} fonti`, perche: 'La maggioranza delle fonti concorda, ma almeno una dissente (✗): da verificare.' };
     if (no && !ok && r.DISTANZA_M != null) return { classe: 'discordi', badge: 'discordi', testo: `da decidere · più vicino a ${r.DISTANZA_M} m`, perche: 'La coordinata è fuori da ogni distretto: la proposta è solo il più vicino e una fonte dissente (✗): civico ANNCSU fuori rete o frazione tutta NO DISTRETTO.' };

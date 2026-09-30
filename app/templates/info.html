@@ -153,6 +153,11 @@
   <p>Più fonti concordano, più la proposta è sicura. Se compare solo una fonte, le altre non erano disponibili per quel
     punto di erogazione (civico non posizionato, via non trovata…). Una ✗ non vuol dire che la proposta sia sbagliata: vuol dire che
     quella fonte dice un'altra cosa, ed è meglio guardare la mappa prima di confermare.</p>
+  <p><strong>Gerarchia delle fonti</strong>: civico ANNCSU, poi stradario, poi via OSM, poi posizione. Se il civico esiste ed è
+    <strong>fuori da ogni distretto</strong> (a più di 30 m dal bordo di un distretto), il suo verdetto è NO DISTRETTO e la
+    proposta è NO DISTRETTO, anche se lo stradario assegna un distretto a tutta la via (per esempio Via Vallescuropasso a Broni:
+    lo stradario dà tutta la via a DBRN02, ma le case in fondo sono fuori rete). In quel caso lo stradario compare come dissenso
+    (<span class="mono">stradario DBRN02 ✗</span>) e la proposta non è "sicura".</p>
   <p>Può comparire anche <strong>civico ANNCSU NODMA ✓</strong>: il civico esiste ma sta fuori da ogni distretto, quindi
     l'indirizzo è fuori dalla rete e <em>NO DISTRETTO</em> potrebbe essere giusto (per esempio Via Novarini 19 a Broni, che è
     fuori distretto anche se la coordinata di Neta, sbagliata di 330 m, cadeva in DBRN03). Il ✓ dice che la fonte c'è e che il
