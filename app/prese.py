@@ -485,6 +485,9 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     p["OSM_FUORI"] = [v in osm_fuori for v in vie_norm]
     omonime = _vie_omonime(vie_norm)
     p["OMONIMA"] = [v in omonime for v in vie_norm]
+    quote_osm = _osm_quote(comune, vie_norm)
+    p["OSM_QUOTE"] = [quote_osm.get(v, "") for v in vie_norm]
+    p["STRADARIO_MSG"] = stradario.motivo_senza_distretto(strade, p["INDIRIZZO"]) if not strade.empty else ["stradario non generato"] * len(p)
     # Frazione tutta NO DISTRETTO (Daniele, 30/09/2026, Casa Bernini a Broni: 27
     # DP tutti NO DISTRETTO, uno a 117 m da un confine riceveva la proposta
     # DBRN05). Vale solo per le frazioni, non per le vie: il DP e' in una frazione
@@ -594,6 +597,7 @@ def _prese_comune(comune: str) -> pd.DataFrame:
 
 _CACHE_OSM_UNICO: dict = {}
 _CACHE_OSM_FUORI: dict = {}
+_CACHE_OSM_QUOTE: dict = {}
 
 # Quota minima del tracciato di una via OSM in un solo distretto perche' la fonte "via OSM" conti.
 # Ridotta da 95% a 90% (Daniele, 30/09/2026: Via Roma a Cassolnovo, al 94% in DCS02, e' tutta DCS02 a
@@ -651,16 +655,29 @@ def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
     chiave = (comune, tuple(sorted(set(vie_neta) - {""})),
               *(p.stat().st_mtime_ns if p.exists() else 0 for p in (vie_osm.PERCORSO_VIE_OSM, motore_calcolo.PERCORSO_CONFINI_DISTRETTI)))
     if chiave not in _CACHE_OSM_UNICO:
+        quote_tutte = _quote_osm(comune, list(chiave[1]))
         esito = {}
-        for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items():
+        for via, (_, quote) in quote_tutte.items():
             if quote and quote[0][0] != "fuori" and quote[0][1] >= SOGLIA_OSM_UNICO:
                 esito[via] = quote[0][0]
         _CACHE_OSM_UNICO[chiave] = esito
         # Vie il cui tracciato sta almeno al 95% fuori da ogni distretto: la
         # fonte "via OSM" dice NO DISTRETTO (Daniele, 30/09/2026).
-        _CACHE_OSM_FUORI[chiave] = {via for via, (_, quote) in _quote_osm(comune, list(chiave[1])).items()
+        _CACHE_OSM_FUORI[chiave] = {via for via, (_, quote) in quote_tutte.items()
                                     if quote and quote[0][0] == "fuori" and quote[0][1] >= SOGLIA_OSM_FUORI}
+        # Come e' diviso il tracciato (per spiegare perche' la via OSM non decide): "DMD01 69% · DMD08 31%".
+        _CACHE_OSM_QUOTE[chiave] = {
+            via: " · ".join(f"{'fuori dai distretti' if d == 'fuori' else d} {round(100 * q)}%" for d, q in quote[:3])
+            for via, (_, quote) in quote_tutte.items() if quote}
     return _CACHE_OSM_UNICO[chiave]
+
+
+def _osm_quote(comune: str, vie_neta: list[str]) -> dict[str, str]:
+    """{via Neta: testo delle quote del tracciato OSM per distretto} (vuoto se la via non e' in OSM)."""
+    _distretto_osm_unico(comune, vie_neta)
+    chiave = (comune, tuple(sorted(set(vie_neta) - {""})),
+              *(p.stat().st_mtime_ns if p.exists() else 0 for p in (vie_osm.PERCORSO_VIE_OSM, motore_calcolo.PERCORSO_CONFINI_DISTRETTI)))
+    return _CACHE_OSM_QUOTE.get(chiave, {})
 
 
 def _osm_fuori(comune: str, vie_neta: list[str]) -> set[str]:
@@ -779,6 +796,27 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     # Stesso nome di strada in piu' frazioni: le fonti mescolano le due strade, quindi non e' mai "sicura"
     # (la proposta resta visibile e si decide a mano).
     p["CONCORDI"] = p["CONCORDI"] & ~p["OMONIMA"]
+    # Le fonti che NON decidono, ciascuna con il suo motivo (Daniele, 30/09/2026: "perche' non sono controllate le altre
+    # fonti?" - lo sono, ma non rispondono, e la riga Fonti mostrava solo quelle che rispondono).
+    non_decidono = []
+    for r in p[["MOTIVO", "D_CIVICO", "CIVICO_FUORI", "CIVICO_ESISTE", "CIV_LAT", "D_STRADARIO", "STRADARIO_MSG", "D_OSM", "OSM_FUORI", "OSM_QUOTE"]].to_dict("records"):
+        m = []
+        if r["MOTIVO"]:
+            if not r["D_CIVICO"] and not r["CIVICO_FUORI"]:
+                if r["CIVICO_ESISTE"] is None:
+                    m.append("civico ANNCSU: via non trovata")
+                elif not r["CIVICO_ESISTE"]:
+                    m.append("civico ANNCSU: civico non presente")
+                elif pd.isna(r["CIV_LAT"]):
+                    m.append("civico ANNCSU: c'è ma senza posizione utilizzabile")
+                else:
+                    m.append("civico ANNCSU: a meno di 30 m da un confine")
+            if not r["D_STRADARIO"]:
+                m.append(f"stradario: {r['STRADARIO_MSG']}")
+            if not r["D_OSM"] and not r["OSM_FUORI"]:
+                m.append(f"via OSM: {r['OSM_QUOTE']} (nessun distretto sopra il {round(100 * SOGLIA_OSM_UNICO)}%)" if r["OSM_QUOTE"] else "via OSM: via non trovata")
+        non_decidono.append(" | ".join(m))
+    p["NON_DECIDONO"] = non_decidono
     p["NODMA_CONTRO_DA"] = civico_contro  # fonti che dicono NODMA contro una proposta con un distretto ("il civico e la posizione"...) o ""
 
     # NO DISTRETTO da confermare (Daniele, 30/09/2026, Broni DP 301802450001613):

@@ -500,7 +500,8 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   }
 
   function testoProposta(r) {
-    const fonti = r.FONTI ? `<div class="testo-tenue">Fonti: ${esc(r.FONTI)}</div>` : '';
+    const fonti = (r.FONTI ? `<div class="testo-tenue">Fonti: ${esc(r.FONTI)}</div>` : '') +
+      (r.NON_DECIDONO ? `<div class="testo-tenue" title="Fonti controllate che non danno un distretto, e perché">Non decidono: ${esc(r.NON_DECIDONO)}</div>` : '');
     if (r.PROPOSTA_DA && r.PROPOSTA_DA !== 'posizione') {
       return `Proposta <strong class="mono">${esc(r.PROPOSTA)}</strong> <span class="testo-tenue">dal ${esc(r.PROPOSTA_DA)}` +
         `${r.CONCORDI ? ' · tutte le fonti concordano' : ''}</span>${fonti}`;

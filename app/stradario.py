@@ -187,6 +187,23 @@ def salva(comune: str, nuovo: pd.DataFrame) -> None:
     tutto.to_csv(PERCORSO_STRADARIO, index=False)
 
 
+def motivo_senza_distretto(stradario: pd.DataFrame, indirizzi) -> list[str]:
+    """Per ogni indirizzo: '' se lo stradario da' un distretto, altrimenti perche' non lo da': la via non c'e', e' a cavallo
+    (con i conteggi), o il civico non e' coperto dai tratti. Serve a spiegare in pagina le fonti che non decidono."""
+    distretti = distretti_da_via(stradario, indirizzi)
+    per_via: dict[str, str] = {}
+    for r in stradario.itertuples(index=False):
+        per_via.setdefault(r.via, str(r.note or "").split("; da ")[0].strip())
+    esito = []
+    for indirizzo, d in zip(indirizzi, distretti):
+        if d:
+            esito.append("")
+            continue
+        via, _ = normalizza_indirizzo(indirizzo)
+        esito.append("via non nello stradario" if via not in per_via else (per_via[via] or "civico non coperto dai tratti della via"))
+    return esito
+
+
 def distretti_da_via(stradario: pd.DataFrame, indirizzi) -> list[str]:
     """Per ogni indirizzo il distretto della via (o del suo tratto di civici,
     le eccezioni di un singolo civico prima di tutto); '' se la via non c'e',
