@@ -371,7 +371,22 @@ document.getElementById('genera-stradario').addEventListener('click', async func
     aggiornaEtichette();
   }
 
-{% if vista == 'assegnare' %}
+  // Campo del distretto (Daniele, 30/09/2026): il menu (datalist) mostra solo le voci che corrispondono a quello che e'
+  // scritto, quindi con un distretto gia' dentro non appariva niente. Entrando nel campo il testo si toglie e il menu
+  // mostra tutti i distretti; se si esce senza scegliere, torna il valore di prima.
+  document.addEventListener('focusin', function (e) {
+    const c = e.target;
+    if (!c.matches || !c.matches('.campo-distretto, #zona-distretto') || c.dataset.prima !== undefined && c.value === '') return;
+    if (c.value) { c.dataset.prima = c.value; c.placeholder = c.value + ' (scegli o scrivi)'; c.value = ''; }
+  });
+  document.addEventListener('focusout', function (e) {
+    const c = e.target;
+    if (!c.matches || !c.matches('.campo-distretto, #zona-distretto')) return;
+    if (!c.value && c.dataset.prima) c.value = c.dataset.prima;
+    delete c.dataset.prima;
+  });
+
+  {% if vista == 'assegnare' %}
   const RIGHE = {{ righe | tojson }};
   const PUO_MODIFICARE = {{ puo_modificare | tojson }};
   const ORIGINE_TESTO = { proposta: "proposta dell'app", manuale: 'spostato a mano', zona: 'spostato con una zona', mantieni: 'mantieni attuale' };
