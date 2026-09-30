@@ -144,22 +144,28 @@ def vie_comune(comune: str) -> dict[str, list[np.ndarray]]:
     return _CACHE["vie"].get(comune.strip().upper(), {})
 
 
-def _simili(a: str, b: str) -> bool:
-    """Stessa parola, o una lettera di differenza per parole lunghe (refusi
-    in OSM: 'Gugliemo Marconi')."""
-    if a == b:
-        return True
-    if min(len(a), len(b)) < 5 or abs(len(a) - len(b)) > 1:
+def _simili(a: str, b: str, vocab: frozenset[str] | None = None) -> bool:
+    """Stessa parola, o una lettera di differenza (refusi in OSM: 'Gugliemo Marconi').
+    - Una lettera in piu' o in meno (AMICI/AMICIS, DOTTOR/DOTTORE, NICOLO'/NICCOLO'): da 5 lettere.
+    - Una lettera sostituita (MONTI/CONTI, CARLO/CARSO, CONTI/CONTE, OLIVO/OLIVA): sotto le 6 lettere
+      sono quasi sempre parole diverse, e da 6 lettere lo sono se tutte e due esistono tra i nomi
+      di Neta del comune (`vocab`). A Cilavegna "VIA P. CONTI" finiva su "Vicolo Vincenzo Monti"
+      (Daniele, 30/09/2026)."""
+    if a == b or (min(len(a), len(b)) >= 5 and a.replace("J", "I") == b.replace("J", "I")):
+        return True  # I e J sono la stessa lettera (IOTTI = JOTTI, BIDOJA = BIDOIA)
+    if abs(len(a) - len(b)) > 1 or min(len(a), len(b)) < 5:
         return False
     if len(a) == len(b):
-        return sum(x != y for x, y in zip(a, b)) == 1
+        if len(a) < 6 or sum(x != y for x, y in zip(a, b)) != 1:
+            return False
+        return not (vocab and a in vocab and b in vocab)
     corta, lunga = sorted((a, b), key=len)
     return any(lunga[:i] + lunga[i + 1:] == corta for i in range(len(lunga)))
 
 
-def _contenute(pv: frozenset[str], po: frozenset[str]) -> bool:
+def _contenute(pv: frozenset[str], po: frozenset[str], vocab: frozenset[str] | None = None) -> bool:
     """Ogni parola di pv ha una parola simile in po."""
-    return all(any(_simili(a, b) for b in po) for a in pv)
+    return all(any(_simili(a, b, vocab) for b in po) for a in pv)
 
 
 _CACHE_ABBINA: dict = {}
@@ -213,7 +219,7 @@ def _prima_della_localita(via: str) -> frozenset[str]:
     return parole(base)[1] or parole(via)[1]
 
 
-def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]]) -> tuple[str, list[str]]:
+def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]], vocab: frozenset[str] | None = None) -> tuple[str, list[str]]:
     """Cerca il nome OSM (o ANNCSU) di una via Neta tra osm = [(nome, tipo, parole)].
     Restituisce ("ok", [nome]), ("ambigua", [nomi a pari merito]) o ("nessuna", [])."""
     tipo, pv = parole(via)
@@ -230,10 +236,10 @@ def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]]) -> tuple[str, l
         # Piazza Vittorio Emanuele II ~ Via di Vittorio facevano abbinamenti sbagliati.
         mancanti = len(pv) - len(po_nome)
         corto = bool(po_nome) and (
-            (mancanti <= 1 and _contenute(po_nome, pv))
+            (mancanti <= 1 and _contenute(po_nome, pv, vocab))
             or (mancanti == 2 and t_osm == tipo and all(w in pv_base for w in po_nome) and max(len(w) for w in po_nome) >= 6))
-        if _contenute(pv, po) or corto:
-            extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
+        if _contenute(pv, po, vocab) or corto:
+            extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b, vocab) for b in po) for a in pv)
             if "PRIVATA" in po and "PRIVATA" not in pv:
                 extra += 2  # via privata solo se non c'e' quella pubblica
             # A parita' vince chi ha piu' parole identiche: la tolleranza sui refusi
@@ -280,7 +286,12 @@ def alias_vie() -> dict[str, list[str]]:
     return _CACHE_ALIAS["alias"]
 
 
-def cerca_via(via: str, nomi: list[str], _osm: list | None = None) -> tuple[str, list[str]]:
+def vocabolario(vie_neta: list[str]) -> frozenset[str]:
+    """Le parole (significative) dei nomi di Neta di un comune."""
+    return frozenset(w for v in vie_neta for w in parole(v)[1])
+
+
+def cerca_via(via: str, nomi: list[str], _osm: list | None = None, vocab: frozenset[str] | None = None) -> tuple[str, list[str]]:
     """Come _cerca, con il nome grezzo e con il tentativo senza la localita' dopo " - ". Prima le
     corrispondenze manuali di vie_alias.csv, se il nome di riferimento e' tra quelli del comune."""
     alias = alias_vie().get(via.strip().upper(), [])
@@ -290,9 +301,9 @@ def cerca_via(via: str, nomi: list[str], _osm: list | None = None) -> tuple[str,
         if trovati:
             return "ok", trovati[:1]
     osm = _osm if _osm is not None else [(n, *parole(n)) for n in nomi]
-    stato, trovati = _cerca(via, osm)
+    stato, trovati = _cerca(via, osm, vocab)
     if stato == "nessuna" and " - " in via:
-        stato, trovati = _cerca(via.split(" - ")[0], osm)
+        stato, trovati = _cerca(via.split(" - ")[0], osm, vocab)
     return stato, trovati
 
 
@@ -306,8 +317,9 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     riprova senza (Daniele, 30/09/2026, Cava Manara)."""
     esito = {}
     osm = [(n, *parole(n)) for n in nomi_osm]
+    vocab = vocabolario(vie_neta)
     for via in vie_neta:
-        stato, trovati = cerca_via(via, nomi_osm, osm)
+        stato, trovati = cerca_via(via, nomi_osm, osm, vocab)
         if stato == "ok":
             esito[via] = trovati[0]
     return esito

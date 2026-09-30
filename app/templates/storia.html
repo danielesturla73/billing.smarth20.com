@@ -431,6 +431,12 @@
     <li><strong>Link "punto di Neta" e frazioni</strong>: a Certosa di Pavia la "Via Camillo Benso Cavour" di Neta è la Via Cavour di OSM, ma sta nella frazione Torriano: Google Maps non la trova
       cercando "Via Cavour, Certosa di Pavia". Accanto al link Google Maps per indirizzo ora c'è "punto di Neta", che apre Google Maps sulla coordinata originale (anche nel messaggio "via non trovata").
       Il match OSM di Via Cavour a Certosa è confermato giusto.</li>
+    <li><strong>Refusi: "Monti" non è "Conti"</strong>: a Cilavegna "VIA P. CONTI" finiva su "Vicolo Vincenzo Monti" di OSM, perché le due parole differiscono di una lettera e l'abbinamento tollera i refusi. Ora una lettera
+      <em>sostituita</em> si tollera solo da 6 lettere in su e solo se le due parole non esistono <em>entrambe</em> tra i nomi di Neta del comune (CONTI e MONTI sono due parole diverse a Cilavegna); una lettera in più o in
+      meno (AMICI/AMICIS, DOTTOR/DOTTORE, NICOLO'/NICCOLO') resta tollerata da 5 lettere; I e J sono la stessa lettera (IOTTI = JOTTI). Effetto su tutti i comuni, confrontato con la versione precedente: escono circa
+      10 abbinamenti sbagliati (CARLO~CARSO: "VIA CARLO PEZZANI" e "CARLO GERMANI" su "VIA CARSO"; "PIAZZA MOTTA" su una strada "della morta"; "VIA EMILIA" su "Via Emilio Alessandrini"; "BIVIO MADONNINA" su "Via Bovio") e
+      circa 10 migliorano (FARINI non è più PARINI, BOTTA non è MOTTA, C.G. BIANCHI non è "Case Bianche"). Ne perdo alcuni giusti, tutti visibili in "Vie da verificare" con i nomi simili: MULINO/MOLINO a Gambolò (13 DP),
+      RECANATA/RICANATA a Stradella (8), OLIVO/OLIVA a Robbio (7), MARCHESINA/MARCHESONA a Landriano (2).</li>
     <li><strong>Da sapere</strong>: a Siziano il confine dei distretti nel GIS è sbagliato (DSZ03 ha la descrizione
       "LANDRIANO CENTRO", geometria a Siziano, bordi spostati di decine di metri): lì i <em>civico fuori ✗</em> sono falsi
       allarmi finché non arriva il confine corretto. Aperti: 1.699 DP con "civico non presente in ANNCSU" non ricevono la
