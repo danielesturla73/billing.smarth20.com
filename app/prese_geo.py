@@ -15,8 +15,15 @@ from app import motore_calcolo
 
 
 # Fuori da ogni confine si propone il distretto piu' vicino solo entro questa
-# distanza: oltre, la proposta sarebbe un tiro a indovinare.
-DISTANZA_MAX_PROPOSTA_M = 300
+# distanza: oltre, la proposta sarebbe un tiro a indovinare. Ridotta da 300 a
+# 100 m (Daniele, 30/09/2026: Casa Bernini a Broni, un DP a 117 m dal confine
+# in una frazione tutta NO DISTRETTO riceveva la proposta DBRN05).
+DISTANZA_MAX_PROPOSTA_M = 100
+
+# Controllo "Diverso dalla posizione": una presa fuori da ogni confine si segnala
+# solo se sta a piu' di tanti metri dal confine del proprio distretto. Resta a
+# 300 m: la riduzione a 100 m riguarda solo le proposte (30/09/2026).
+DISTANZA_MAX_POSIZIONE_M = 300
 
 # Controllo "Diverso dalla posizione": una presa a meno di questi metri dal
 # confine del proprio distretto non si segnala, lo scarto puo' essere solo

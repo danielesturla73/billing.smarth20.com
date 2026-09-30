@@ -428,6 +428,17 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     p["D_OSM"] = [osm_via.get(v, "") for v in vie_norm]
     osm_fuori = _osm_fuori(comune, vie_norm)
     p["OSM_FUORI"] = [v in osm_fuori for v in vie_norm]
+    # Frazione tutta NO DISTRETTO (Daniele, 30/09/2026, Casa Bernini a Broni: 27
+    # DP tutti NO DISTRETTO, uno a 117 m da un confine riceveva la proposta
+    # DBRN05). Vale solo per le frazioni, non per le vie: il DP e' in una frazione
+    # con almeno MIN_DP_FRAZIONE altri DP, di cui almeno QUOTA_FRAZIONE_ND NO DISTRETTO in Neta.
+    frazione = pd.Series([v if v.startswith(("FRAZIONE ", "FRAZ. ", "FRAZ ")) else "" for v in vie_norm], index=p.index)
+    nodma = (p["MOTIVO"] == "NODMA")
+    n_frazione = frazione.map(frazione[frazione != ""].value_counts()).fillna(0)
+    n_nodma = frazione.map(nodma[frazione != ""].groupby(frazione[frazione != ""]).sum()).fillna(0)
+    altri = n_frazione - 1
+    altri_nodma = n_nodma - nodma.astype(int)
+    p["FRAZIONE_ND"] = ((frazione != "") & (altri >= MIN_DP_FRAZIONE) & (altri_nodma >= QUOTA_FRAZIONE_ND * altri)).to_numpy()
     p["D_POSIZIONE"] = [""] * len(p)
     v = np.nonzero(p["COORD_VALIDE"].to_numpy())[0]
     if len(v):
@@ -441,7 +452,7 @@ def _prese_comune(comune: str) -> pd.DataFrame:
     # ogni distretto della presa (piu' codici se i servizi non concordano):
     # - presa dentro il confine di un ALTRO distretto (es. a Belgioioso prese
     #   codificate DBLG02 Santa Margherita che stanno in DBLG03 Centro);
-    # - presa fuori da ogni confine e a piu' di DISTANZA_MAX_PROPOSTA_M dal
+    # - presa fuori da ogni confine e a piu' di DISTANZA_MAX_POSIZIONE_M dal
     #   confine del suo distretto;
     # - distretto senza confine disegnato (Casteggio, Voghera in parte) e
     #   presa dentro il confine di un altro distretto, diverso da quello in
@@ -463,7 +474,7 @@ def _prese_comune(comune: str) -> pd.DataFrame:
             k = np.nonzero(k)[0]
             if codice in con_confine:
                 dentro, dist = _dentro_e_distanza(lat[k], lon[k], codice)
-                lontana = np.where(dal_confine[k] != "", dist > TOLLERANZA_BORDO_M, dist > DISTANZA_MAX_PROPOSTA_M)
+                lontana = np.where(dal_confine[k] != "", dist > TOLLERANZA_BORDO_M, dist > DISTANZA_MAX_POSIZIONE_M)
                 sbagliato[k[~dentro & lontana]] = True
             else:
                 # La zona abituale (dove cade la maggior parte delle sue
@@ -525,6 +536,11 @@ def _prese_comune(comune: str) -> pd.DataFrame:
 
 _CACHE_OSM_UNICO: dict = {}
 _CACHE_OSM_FUORI: dict = {}
+
+# Fonte "resto della frazione": almeno tanti altri DP nella frazione, e almeno
+# questa quota NO DISTRETTO in Neta.
+MIN_DP_FRAZIONE = 5
+QUOTA_FRAZIONE_ND = 0.9
 
 
 def _distretto_osm_unico(comune: str, vie_neta: list[str]) -> dict[str, str]:
@@ -611,14 +627,16 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
     p["PROPOSTA_DA"] = [f or (("punto calcolato" if u else "posizione") if c else "")
                         for f, (c, _), u in zip(p["FONTE_INDIRIZZO"], proposte, usa_sis)]
     fonti, concordi = [], []
-    for r, (c, d), u in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI"]].to_dict("records"), proposte, usa_sis):
+    for r, (c, d), u in zip(p[["PROPOSTA", "D_CIVICO", "D_STRADARIO", "D_OSM", "CIVICO_FUORI", "FRAZIONE_ND"]].to_dict("records"), proposte, usa_sis):
         # Civico ANNCSU esistente ma fuori da ogni distretto: fonte che dissente
         # da qualunque proposta (Daniele, 30/09/2026, Via Novarini 19 a Broni:
         # la coordinata Neta era in DBRN03, il civico fuori rete). La proposta
         # resta visibile ma non e' mai CONCORDI: la decide l'utente.
         elenco = [("civico ANNCSU", r["D_CIVICO"] or ("fuori" if r["CIVICO_FUORI"] and r["PROPOSTA"] else "")),
                   ("stradario", r["D_STRADARIO"]), ("via OSM", r["D_OSM"]),
-                  ("posizione", c if d is None and not u else "")]
+                  ("posizione", c if d is None and not u else ""),
+                  # frazione tutta NO DISTRETTO: dissente da una proposta con un distretto
+                  ("resto della frazione", "NO DISTRETTO" if r["FRAZIONE_ND"] and r["PROPOSTA"] else "")]
         elenco = [(n, x) for n, x in elenco if x]
         fonti.append(" · ".join(f"{n} {x} {'✓' if x == r['PROPOSTA'] else '✗'}" for n, x in elenco))
         concordi.append(bool(r["PROPOSTA"]) and len(elenco) >= 2 and all(x == r["PROPOSTA"] for _, x in elenco))
@@ -643,6 +661,8 @@ def prese_da_assegnare(comune: str, con_proposta: bool = True) -> pd.DataFrame:
                 elenco.append("posizione")
             if r["OSM_FUORI"]:
                 elenco.append("via OSM")
+            if r["FRAZIONE_ND"]:
+                elenco.append("resto della frazione")
             if not elenco:
                 continue
             nome = " + ".join(elenco)
@@ -920,6 +940,7 @@ def salva_assegnazioni(comune: str, voci: list[dict], utente: str) -> tuple[int,
 # restano raggiungibili come prese.<nome>, quindi il resto dell'app non cambia.
 from app.prese_geo import (  # noqa: E402
     DISTANZA_MAX_PROPOSTA_M,
+    DISTANZA_MAX_POSIZIONE_M,
     TOLLERANZA_BORDO_M,
     _CACHE_CONFINI,
     _poligoni,
