@@ -17,9 +17,19 @@
   <div class="filtri-grafico">
     <label for="filtro-tema">Colora per</label>
     <select id="filtro-tema">
-      <option value="affidabilita">Affidabilità del dato (ultimo mese)</option>
-      <option value="volume">Volume consumato (ultimo mese)</option>
+      <option value="affidabilita">Affidabilità del dato</option>
+      <option value="volume">Volume consumato</option>
       <option value="segnalazioni">Segnalazioni aperte</option>
+    </select>
+    <label for="filtro-da">Mese</label>
+    <select id="filtro-da" title="Senza scelta: l'ultimo mese disponibile di ogni comune. Con un solo mese: quel mese. Con due: il periodo, con i volumi sommati.">
+      <option value="">Ultimo disponibile</option>
+      {% for m in mesi_disponibili %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+    </select>
+    <label for="filtro-a">fino a</label>
+    <select id="filtro-a" title="Facoltativo: per un periodo, dal mese scelto a questo.">
+      <option value="">—</option>
+      {% for m in mesi_disponibili %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
     </select>
   </div>
   <div class="mappa-layout">
@@ -30,7 +40,7 @@
     <div class="table-scroll">
       <table id="tabella-comuni">
         <thead>
-          <tr><th>Comune</th><th class="num">Distr.</th><th class="num">Ultimo mese</th>
+          <tr><th>Comune</th><th class="num">Distr.</th><th class="num" id="th-mese">Ultimo mese</th>
               <th class="num">Volume (m³)</th><th>Dati</th><th class="num">Segn.</th></tr>
         </thead>
         <tbody>
@@ -38,9 +48,9 @@
           <tr class="riga-comune" data-comune="{{ c.comune }}" style="cursor:pointer">
             <td><a href="/pagine/comune/{{ c.comune | urlencode }}">{{ c.comune }}</a></td>
             <td class="num">{{ c.n_distretti }}</td>
-            <td class="num">{{ c.mese or '—' }}</td>
-            <td class="num">{{ "{:,.0f}".format(c.volume).replace(",", ".") if c.volume is not none else '—' }}</td>
-            <td>{% if c.stato == 'incompleto' %}<span class="badge nodata" title="Volume dell'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Incompleto</span>
+            <td class="num c-mese">{{ c.mese or '—' }}</td>
+            <td class="num c-volume">{{ "{:,.0f}".format(c.volume).replace(",", ".") if c.volume is not none else '—' }}</td>
+            <td class="c-dati">{% if c.stato == 'incompleto' %}<span class="badge nodata" title="Volume dell'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Incompleto</span>
                 {% elif c.stato == 'consolidato' %}<span class="badge real">Consolidato</span>
                 {% elif c.stato == 'provvisorio' %}<span class="badge stimato">Provvisorio</span>
                 {% elif c.stato == 'interpolato' %}<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Interpolato</span>
@@ -86,7 +96,72 @@
     return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('');
   }
 
-  const volumeMassimo = Math.max(0, ...Object.values(DATI).map(v => v.volume || 0));
+  // Mese o periodo scelto (Daniele, 30/09/2026): EFF = i dati mostrati. Senza scelta sono quelli dell'ultimo mese di
+  // ogni distretto (DATI); con un mese, quel mese; con due, il periodo con i volumi sommati.
+  let EFF = DATI;
+  let volumeMassimo = Math.max(0, ...Object.values(DATI).map(v => v.volume || 0));
+  const arr1 = x => Math.round(x * 10) / 10;
+
+  function periodoScelto() {
+    const da = selDa.value, a = selA.value;
+    if (!da && !a) return null;
+    let x = da || a, y = a || da;
+    if (x > y) [x, y] = [y, x];
+    return { da: x, a: y };
+  }
+
+  function calcolaEffettivi(p) {
+    if (!p) return DATI;
+    const etichetta = p.da === p.a ? p.da : `${p.da} → ${p.a}`;
+    const out = {};
+    for (const [codice, v] of Object.entries(DATI)) {
+      let r = 0, pv = 0, i = 0, inc = false, n = 0;
+      for (const [mese, x] of Object.entries(v.per_mese || {})) {
+        if (mese >= p.da && mese <= p.a) { r += x[0]; pv += x[1]; i += x[2]; if (x[3]) inc = true; n++; }
+      }
+      const tot = r + pv + i;
+      out[codice] = {
+        comune: v.comune, mese: n ? etichetta : null, volume: n ? Math.round(tot * 100) / 100 : null,
+        pct_reale: tot ? arr1(r / tot * 100) : 0, pct_provvisorio: tot ? arr1(pv / tot * 100) : 0,
+        pct_interpolato: tot ? arr1(i / tot * 100) : 0, incompleto: inc, n_segnalazioni: v.n_segnalazioni,
+      };
+    }
+    return out;
+  }
+
+  const NON_DISTRETTI = ['NODMA', 'ND'];
+  function statoDato(pProv, pInterp, incompleto) {
+    if (incompleto) return 'incompleto';
+    if (pInterp > 0) return 'interpolato';
+    if (pProv > 10) return 'provvisorio';
+    return 'consolidato';
+  }
+  const BADGE = {
+    incompleto: '<span class="badge nodata" title="Volume dell\'ultimo mese sotto il 70% dei mesi precedenti: mancano ancora le letture di chiusura">Incompleto</span>',
+    consolidato: '<span class="badge real">Consolidato</span>',
+    provvisorio: '<span class="badge stimato">Provvisorio</span>',
+    interpolato: '<span class="badge stimato" style="background:var(--red-bg);color:var(--red)">Interpolato</span>',
+    nessuno: '<span class="badge nodata">Nessun dato</span>',
+  };
+  // Tabella dei comuni: stessa regola del server (_righe_comuni_mappa) sui dati mostrati.
+  function aggiornaTabella() {
+    const periodo = periodoScelto();
+    document.getElementById('th-mese').textContent = periodo ? (periodo.da === periodo.a ? 'Mese' : 'Periodo') : 'Ultimo mese';
+    document.querySelectorAll('.riga-comune').forEach(function (riga) {
+      const c = normalizza(riga.dataset.comune);
+      const con = Object.entries(EFF).filter(([cod, v]) => normalizza(v.comune) === c && !NON_DISTRETTI.includes(cod) && v.mese);
+      const mese = con.reduce((m, [, v]) => (v.mese > m ? v.mese : m), '');
+      const ultimi = con.map(([, v]) => v).filter(v => v.mese === mese);
+      const volume = ultimi.reduce((t, v) => t + v.volume, 0);
+      const prov = ultimi.reduce((t, v) => t + v.volume * v.pct_provvisorio / 100, 0);
+      const interp = ultimi.reduce((t, v) => t + v.volume * v.pct_interpolato / 100, 0);
+      riga.querySelector('.c-mese').textContent = mese || '—';
+      riga.querySelector('.c-volume').textContent = mese ? Math.round(volume).toLocaleString('it-IT') : '—';
+      riga.querySelector('.c-dati').innerHTML = mese
+        ? BADGE[statoDato(volume ? prov / volume * 100 : 0, volume ? interp / volume * 100 : 0, ultimi.some(v => v.incompleto))]
+        : BADGE.nessuno;
+    });
+  }
 
   // Un colore per ogni tema, dato il dizionario DATI[codice_distretto]
   // (puo' essere undefined: distretto di un comune non ancora caricato).
@@ -128,6 +203,8 @@
   };
 
   const selTema = document.getElementById('filtro-tema');
+  const selDa = document.getElementById('filtro-da');
+  const selA = document.getElementById('filtro-a');
   const legenda = document.getElementById('legenda');
 
   const mappa = L.map('mappa', { zoomControl: true, attributionControl: true });
@@ -139,7 +216,7 @@
   L.control.layers(null, { 'Confini comuni (ISTAT)': stratoConfiniComuni(mappa) }, { position: 'topright' }).addTo(mappa);
 
   function stileCorrente(feature) {
-    const v = DATI[feature.properties.codice_distretto];
+    const v = EFF[feature.properties.codice_distretto];
     return {
       color: TEAL_DARK,
       weight: 1.5,
@@ -164,7 +241,7 @@
     onEachFeature: function (feature, layer) {
       const p = feature.properties;
       const v = DATI[p.codice_distretto];
-      const etichetta = () => `<strong style="font-family:'IBM Plex Mono',monospace">${p.codice_distretto}</strong><br>${p.nome_distretto}<br>${testoInfo(v)}`;
+      const etichetta = () => `<strong style="font-family:'IBM Plex Mono',monospace">${p.codice_distretto}</strong><br>${p.nome_distretto}<br>${testoInfo(EFF[p.codice_distretto])}`;
       const comune = (v && v.comune) || p.comune || '';
       const caricato = COMUNI_CARICATI.has(normalizza(comune));
       const suffisso = caricato
@@ -197,6 +274,14 @@
     strato.setStyle(stileCorrente);
     aggiornaLegenda();
   });
+  function cambiaPeriodo() {
+    EFF = calcolaEffettivi(periodoScelto());
+    volumeMassimo = Math.max(0, ...Object.values(EFF).map(v => v.volume || 0));
+    strato.setStyle(stileCorrente);
+    aggiornaTabella();
+  }
+  selDa.addEventListener('change', cambiaPeriodo);
+  selA.addEventListener('change', cambiaPeriodo);
   aggiornaLegenda();
 
   // Clic su una riga della tabella (fuori dal link): zoom sui distretti di quel comune.

@@ -1373,7 +1373,16 @@ def _dati_tematici_mappa() -> dict:
                     "pct_interpolato": round(r["Interpolato (m3)"] / totale * 100, 1) if totale else 0,
                     "incompleto": str(r["Mese"]) in incompleti,
                     "n_segnalazioni": 0,
+                    "per_mese": {},
                 }
+            # Tutti i mesi, per il selettore del mese o del periodo della Home (Daniele, 30/09/2026):
+            # [reale, provvisorio, interpolato (m3), mese incompleto 0/1].
+            for _, r in origine.iterrows():
+                d = dati.get(r["Codice Distretto"])
+                if d is not None:
+                    d["per_mese"][str(r["Mese"])] = [
+                        round(float(r["Reale (m3)"]), 2), round(float(r["Provvisorio (m3)"]), 2),
+                        round(float(r["Interpolato (m3)"]), 2), int(str(r["Mese"]) in incompleti)]
 
         conteggio = pd.concat([
             risultato.anomalie_metodo_b[["DISTRETTO"]].rename(columns={"DISTRETTO": "Codice Distretto"}),
@@ -1388,6 +1397,7 @@ def _dati_tematici_mappa() -> dict:
                     "pct_reale": None, "pct_provvisorio": None, "pct_interpolato": None,
                     "incompleto": False,
                     "n_segnalazioni": int(n),
+                    "per_mese": {},
                 }
     return dati
 
@@ -1546,7 +1556,9 @@ def pagina_mappa(request: Request):
     geojson, confini_veri = _geojson_per_mappa()
     comuni_disponibili = _comuni_disponibili()
     dati_tematici = _dati_tematici_mappa()
+    mesi_disponibili = sorted({m for v in dati_tematici.values() for m in v.get("per_mese", {})}, reverse=True)
     return templates.TemplateResponse(request, "mappa.html", {
+        "mesi_disponibili": mesi_disponibili,
         "request": request,
         "pagina_attiva": "mappa",
         "comuni_disponibili": comuni_disponibili,
