@@ -290,8 +290,12 @@ document.getElementById('genera-stradario').addEventListener('click', async func
   const baseSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'Esri World Imagery', maxZoom: 20, maxNativeZoom: 19,
   });
+  const confiniComuni = stratoConfiniComuni(mappa);
   L.control.layers({ 'Mappa': baseMappa, 'Satellite': baseSatellite },
-    { 'Confini comuni (ISTAT)': stratoConfiniComuni(mappa) }, { position: 'topright' }).addTo(mappa);
+    { 'Confini comuni (ISTAT)': confiniComuni }, { position: 'topright' }).addTo(mappa);
+  // Acceso di default (Daniele, 30/09/2026): per vedere subito se un DP sta vicino al confine del
+  // comune. Si spegne dal menu dei livelli in alto a destra.
+  confiniComuni.addTo(mappa);
 
   // Etichette dei codici distretto: solo da vicino, altrimenti si sovrappongono.
   const etichette = L.layerGroup();
