@@ -46,6 +46,7 @@ import pandas as pd
 
 from app import accessi, anncsu, auth, cache_disco, consolidamento, database, invio_wms, motore_calcolo, prese, prese_confronto, stradario, vie_osm
 from app import prese_gis as prese_gis_modulo
+from app import prese_vie as prese_vie_modulo
 
 app = FastAPI(
     title="Analisi Consumi da Fatturazione",
@@ -1915,6 +1916,22 @@ def prese_gis(request: Request, comune: str = ""):
     contenuto = prese_gis_modulo.esporta_gis_excel(comuni)
     nome = f"prese_fuori_confine_per_GIS_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.xlsx"
     auth.registra(request.state.utente["username"], "prese_gis", comune or "tutti i comuni", accessi.ip_client(request))
+    return Response(
+        content=contenuto,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get("/prese/vie")
+async def prese_vie(request: Request, comune: str = ""):
+    """Excel di controllo dei nomi: le vie e le frazioni di Neta che non si abbinano a OpenStreetMap o ad ANNCSU
+    (o si abbinano in modo ambiguo), con i candidati vicini. Non modifica niente. Senza comune: tutti (la prima
+    volta ci vuole circa un minuto, poi il risultato e' in cache)."""
+    comuni = [comune.strip().upper()] if comune else _comuni_disponibili()
+    contenuto = await run_in_threadpool(prese_vie_modulo.esporta_vie_excel, comuni)
+    nome = f"prese_vie_da_verificare_{comune.strip().replace(' ', '_') or 'tutti'}_{time.strftime('%Y%m%d')}.xlsx"
+    auth.registra(request.state.utente["username"], "prese_vie", comune or "tutti i comuni", accessi.ip_client(request))
     return Response(
         content=contenuto,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

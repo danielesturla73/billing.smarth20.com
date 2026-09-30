@@ -29,7 +29,7 @@ TIPI = {"VIA", "VIALE", "V", "VLE", "PIAZZA", "PZA", "P", "PIAZZALE", "PLE", "CO
         "VICOLO", "VIC", "LARGO", "LGO", "CONTRADA", "PRIVATA", "PASSAGGIO", "BORGO", "LOCALITA", "LOC",
         "REGIONE", "REG", "TRAVERSA", "PROVINCIALE", "COMUNALE", "VICINALE", "STRADONE"}
 PAROLE_VUOTE = {"DI", "DEL", "DELLA", "DELLE", "DEI", "DEGLI", "DE", "D", "DA", "E", "LA", "LE", "IL", "LO", "GLI", "L", "AL", "ALLA"}
-ABBREVIAZIONI = {"FLLI": "FRATELLI", "LLI": "FRATELLI", "S": "SAN", "SS": "SANTI", "STA": "SANTA",
+ABBREVIAZIONI = {"FLLI": "FRATELLI", "LLI": "FRATELLI", "S": "SAN", "SANT": "SAN", "SS": "SANTI", "STA": "SANTA",
                  "MONS": "MONSIGNORE", "GEN": "GENERALE", "PROF": "PROFESSORE", "DOTT": "DOTTORE", "ING": "INGEGNERE",
                  "AVV": "AVVOCATO", "CAV": "CAVALIERE", "MAD": "MADONNA", "B": "BEATO", "ON": "ONOREVOLE", "PAPA": "PAPA"}
 NUMERI = {"1": "PRIMO", "I": "PRIMO", "2": "DUE", "II": "DUE", "4": "QUATTRO", "IV": "QUATTRO", "8": "OTTO",
@@ -45,6 +45,25 @@ ORDINALI = {"II": "SECONDO", "III": "TERZO", "IV": "QUARTO", "VI": "SESTO", "VII
             "XV": "QUINDICESIMO", "XVI": "SEDICESIMO", "XVII": "DICIASSETTESIMO", "XVIII": "DICIOTTESIMO",
             "XIX": "DICIANNOVESIMO", "XX": "VENTESIMO", "XXI": "VENTUNESIMO", "XXII": "VENTIDUESIMO",
             "XXIII": "VENTITREESIMO"}
+# Giorni delle date (XX Settembre, XXVII Marzo, 8 Marzo): romani e arabi da 1 a 31 diventano la stessa parola,
+# come in OpenStreetMap ("Via Venti Settembre"). Voghera: CORSO XXVII MARZO non si abbinava (135 DP).
+_GIORNI = ["PRIMO", "DUE", "TRE", "QUATTRO", "CINQUE", "SEI", "SETTE", "OTTO", "NOVE", "DIECI", "UNDICI", "DODICI", "TREDICI",
+           "QUATTORDICI", "QUINDICI", "SEDICI", "DICIASSETTE", "DICIOTTO", "DICIANNOVE", "VENTI", "VENTUNO", "VENTIDUE",
+           "VENTITRE", "VENTIQUATTRO", "VENTICINQUE", "VENTISEI", "VENTISETTE", "VENTOTTO", "VENTINOVE", "TRENTA", "TRENTUNO"]
+
+
+def _romano(n: int) -> str:
+    esito = ""
+    for valore, lettere in ((10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        while n >= valore:
+            esito += lettere
+            n -= valore
+    return esito
+
+
+for _i, _nome in enumerate(_GIORNI, start=1):
+    NUMERI.setdefault(str(_i), _nome)
+    NUMERI.setdefault(_romano(_i), _nome)
 # Non sono vie: una cascina o una frazione non ha un tracciato con cui
 # confrontare la presa (CASCINA DOSSELLO non e' Via Dossello).
 NON_VIE = {"CASCINA", "CASCINE", "FRAZIONE", "FRAZ", "CASE", "PODERE", "FONDO", "CA"}
@@ -57,7 +76,7 @@ def parole(nome: str) -> tuple[str, frozenset[str]]:
     ('VIA', {'FRATELLI', 'CAIROLI'}); le iniziali puntate spariscono, i
     numeri delle date diventano parole (XX SETTEMBRE -> VENTI SETTEMBRE)."""
     testo = unicodedata.normalize("NFKD", str(nome)).encode("ascii", "ignore").decode().upper()
-    testo = testo.replace("F.LLI", "FLLI ").replace("P.LE", "PIAZZALE ").replace("V.LE", "VIALE ").replace("C.SO", "CORSO ")
+    testo = testo.replace("F.LLI", "FLLI ").replace("P.LE", "PIAZZALE ").replace("V.LE", "VIALE ").replace("C.SO", "CORSO ").replace("CIRC.NE", "CIRCONVALLAZIONE ")
     grezze = [p for p in re.split(r"[^A-Z0-9]+", testo) if p]
     if grezze and grezze[0] in NON_VIE:
         return grezze[0], frozenset()
@@ -163,6 +182,70 @@ def abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     return dict(_CACHE_ABBINA[chiave])
 
 
+# Frazioni, regioni, localita' e cascine: prefissi intercambiabili tra loro (Neta "FRAZIONE MONTALLEGRO",
+# ANNCSU "REGIONE MONTALLEGRO"), ma NON con le vie (CASCINA DOSSELLO non e' VIA DOSSELLO).
+PREFISSI_LOCALITA = {"FRAZIONE", "FRAZ", "REGIONE", "REG", "LOCALITA", "LOC", "CASCINA", "CASCINE", "CASC", "CNA"}
+
+
+def _compatta(nome: str) -> tuple[str, str]:
+    """(famiglia, corpo) di un nome, per il confronto "compatto": famiglia 'loc' se inizia con un prefisso di
+    localita', altrimenti 'via'; corpo = il nome senza tipo, senza spazi ne' punteggiatura, con le
+    abbreviazioni sciolte (S. ANNA = SANT'ANNA, CASA MASSIMINI = CASAMASSIMINI, LAMARMORA = LA MARMORA)."""
+    testo = unicodedata.normalize("NFKD", str(nome)).encode("ascii", "ignore").decode().upper()
+    testo = testo.replace("C.NA", "CASCINA ").replace("F.LLI", "FLLI ").replace("CIRC.NE", "CIRCONVALLAZIONE ")
+    gr = [t for t in re.split(r"[^A-Z0-9]+", testo) if t]
+    famiglia = "via"
+    while len(gr) > 1 and (gr[0] in TIPI or gr[0] in PREFISSI_LOCALITA or gr[0] == "PRIV"):
+        if gr[0] in PREFISSI_LOCALITA:
+            famiglia = "loc"
+        gr = gr[1:]
+    return famiglia, "".join(ABBREVIAZIONI.get(t, t) for t in gr)
+
+
+def _cerca(via: str, osm: list[tuple[str, str, frozenset[str]]]) -> tuple[str, list[str]]:
+    """Cerca il nome OSM (o ANNCSU) di una via Neta tra osm = [(nome, tipo, parole)].
+    Restituisce ("ok", [nome]), ("ambigua", [nomi a pari merito]) o ("nessuna", [])."""
+    tipo, pv = parole(via)
+    if not pv:
+        return "nessuna", []
+    candidati = []
+    for nome, t_osm, po in osm:
+        po_nome = po - {"PRIVATA"}  # il nome OSM contenuto in quello Neta (Strada Privata M. Sironi = VIA MARIO SIRONI)
+        if _contenute(pv, po) or (po_nome and _contenute(po_nome, pv) and len(pv) - len(po_nome) <= 1):
+            extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
+            if "PRIVATA" in po and "PRIVATA" not in pv:
+                extra += 2  # via privata solo se non c'e' quella pubblica
+            # A parita' vince chi ha piu' parole identiche: la tolleranza sui refusi
+            # (GALILEI ~ GALILEO) faceva pareggiare Via Galileo Galilei e Via Galileo
+            # Ferraris (Daniele, 30/09/2026, Broni).
+            esatte = sum(a in po for a in pv)
+            # A ulteriore parita' (stessa via scritta in due modi, "Paolo VI" e "Paolo Sesto")
+            # vince il nome scritto come quello di Neta.
+            identico = 0 if nome.upper().strip() == via.upper().strip() else 1
+            candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, identico, nome))
+    if not candidati:
+        # Ultimo tentativo, solo se il metodo per parole non trova niente (non cambia gli abbinamenti
+        # che gia' funzionano): stesso nome scritto in modo compatto.
+        k = _compatta(via)
+        uguali = [nome for nome, _, _ in osm if k[1] and _compatta(nome) == k]
+        if len(uguali) == 1:
+            return "ok", uguali
+        return ("ambigua", uguali) if uguali else ("nessuna", [])
+    candidati.sort()
+    if len(candidati) > 1 and candidati[0][:4] == candidati[1][:4]:
+        return "ambigua", [c[4] for c in candidati if c[:4] == candidati[0][:4]]
+    return "ok", [candidati[0][4]]
+
+
+def cerca_via(via: str, nomi: list[str]) -> tuple[str, list[str]]:
+    """Come _cerca, con il nome grezzo e con il tentativo senza la localita' dopo " - "."""
+    osm = [(n, *parole(n)) for n in nomi]
+    stato, trovati = _cerca(via, osm)
+    if stato == "nessuna" and " - " in via:
+        stato, trovati = _cerca(via.split(" - ")[0], osm)
+    return stato, trovati
+
+
 def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     """{via Neta: nome OSM} per le vie abbinabili senza ambiguita'. Le parole
     del nome Neta devono stare tutte in quello OSM (VIA CRIMINALI ->
@@ -173,39 +256,12 @@ def _abbina(vie_neta: list[str], nomi_osm: list[str]) -> dict[str, str]:
     riprova senza (Daniele, 30/09/2026, Cava Manara)."""
     osm = [(n, *parole(n)) for n in nomi_osm]
     esito = {}
-
-    def cerca(via: str):
-        tipo, pv = parole(via)
-        if not pv:
-            return None
-        candidati = []
-        for nome, t_osm, po in osm:
-            po_nome = po - {"PRIVATA"}  # il nome OSM contenuto in quello Neta (Strada Privata M. Sironi = VIA MARIO SIRONI)
-            if _contenute(pv, po) or (po_nome and _contenute(po_nome, pv) and len(pv) - len(po_nome) <= 1):
-                extra = len(po) + len(pv) - 2 * sum(any(_simili(a, b) for b in po) for a in pv)
-                if "PRIVATA" in po and "PRIVATA" not in pv:
-                    extra += 2  # via privata solo se non c'e' quella pubblica
-                # A parita' vince chi ha piu' parole identiche: la tolleranza sui refusi
-                # (GALILEI ~ GALILEO) faceva pareggiare Via Galileo Galilei e Via Galileo
-                # Ferraris (Daniele, 30/09/2026, Broni).
-                esatte = sum(a in po for a in pv)
-                # A ulteriore parita' (stessa via scritta in due modi, "Paolo VI" e "Paolo Sesto")
-                # vince il nome scritto come quello di Neta.
-                identico = 0 if nome.upper().strip() == via.upper().strip() else 1
-                candidati.append((extra, 0 if t_osm == tipo else 1, -esatte, identico, nome))
-        if not candidati:
-            return None
-        candidati.sort()
-        if len(candidati) > 1 and candidati[0][:4] == candidati[1][:4]:
-            return "AMBIGUA"
-        return candidati[0][4]
-
     for via in vie_neta:
-        trovato = cerca(via)
-        if trovato is None and " - " in via:
-            trovato = cerca(via.split(" - ")[0])
-        if trovato and trovato != "AMBIGUA":
-            esito[via] = trovato
+        stato, trovati = _cerca(via, osm)
+        if stato == "nessuna" and " - " in via:
+            stato, trovati = _cerca(via.split(" - ")[0], osm)
+        if stato == "ok":
+            esito[via] = trovati[0]
     return esito
 
 
